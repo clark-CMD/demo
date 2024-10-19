@@ -12,4 +12,4 @@
 [2606:4700:9a99:d8db:2746:4fb5:91aa:93b3]:443#Clark Hong Kong 12
 [2606:4700:9b0a:f804:cc14:c03:8bea:c8a7]:443#Clark Hong Kong 13
 [2606:4700:9b00:bae3:e084:c18:ef2c:47a8]:443#Clark Hong Kong 14
-[2606:4700:9ae2:4bb5:2951:e16c:4d98:962b]:443#Clar kHong Kong 15
+[2606:4700:9ae2:4bb5:2951:e16c:4d98:962b]:443#Clark Hong Kong 15
