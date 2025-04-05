@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         扇贝阅读 Safari 阅读模式优化 v0.9 (Hash触发完成)
+// @name         扇贝阅读 Safari 阅读模式优化 v1.1 (按钮置顶)
 // @namespace    http://tampermonkey.net/
-// @version      0.9
-// @description  精确重建内容，保留标记，并在阅读模式末尾添加链接，尝试通过URL哈希变化触发“完成阅读”。
+// @version      1.1
+// @description  按钮移到标题下方。修复首次加载，精确重建内容，保留标记，哈希触发完成。
 // @author       Your Name & Claude
 // @match        https://web.shanbay.com/reading/web-news/articles/*
 // @grant        none
@@ -14,22 +14,28 @@
 
     // --- 配置 ---
     const config = {
-        paragraphSelector: '.article-content > .para',
-        sentenceSelector: '.sentence',
-        wordSelector: '.word',
-        boldClass: 'word-bold',
-        learnedClass: 'learned',
-        titleSelectors: ['h2.article-title', '.article-header h2', 'h1', 'h2'],
-        contentContainerSelector: '.article-content',
-        originalFinishButtonSelector: 'a.article-button.finish-button',
-        finishActionHash: '#shanbayReaderFinishAction', // 用于触发操作的独特哈希值
-        debug: true
+        paragraphSelector: '.article-content > .para',         // 段落容器的选择器 (在 contentContainer 内查找)
+        sentenceSelector: '.sentence',                         // 句子容器的选择器 (在段落内查找)
+        wordSelector: '.word',                                 // 单词 span 的选择器 (在句子内或包裹单词的 span 内查找)
+        boldClass: 'word-bold',                                // 加粗单词的 class
+        learnedClass: 'learned',                               // 已学单词的 class
+        titleSelectors: ['h2.article-title', '.article-header h2', 'h1', 'h2'], // 可能的文章标题选择器
+        contentContainerSelector: '.article-content',          // 包含所有 .para 的容器，也是原始内容要隐藏的目标
+        originalFinishButtonSelector: 'a.article-button.finish-button', // 原始完成按钮的选择器
+        finishActionHash: '#shanbayReaderFinishAction',        // 用于触发操作的独特哈希值
+        checkInterval: 500,                                    // 轮询检查间隔 (毫秒)
+        maxCheckAttempts: 15,                                  // 最大轮询检查次数 (500ms * 15 = 7.5 秒)
+        mutationObserverDelay: 750,                            // MutationObserver 触发后等待渲染的延迟
+        debug: true                                            // 是否在控制台输出调试信息
     };
+
+    const marker = 'readerModeRestructured'; // 用于防止重复执行的标记
 
     // --- 工具函数 ---
     function log(message) {
         if (config.debug) {
-            console.log('[Shanbay Reader Mode Fix v0.9] ' + message);
+            // 输出带时间戳的日志
+            console.log(`[Shanbay Reader Fix v1.1 | ${new Date().toLocaleTimeString()}] ${message}`);
         }
     }
 
@@ -44,8 +50,10 @@
                 try {
                     originalButton.click();
                     log('Original finish button clicked successfully via hash change.');
+                    // 点击成功后一般不需要 alert，因为页面行为会改变
                 } catch (e) {
                     log('Error clicking the original button via hash change: ' + e);
+                    // 只有出错时才提示用户
                     alert('尝试点击“完成阅读”按钮时出错，请手动点击。');
                 }
             } else {
@@ -55,13 +63,18 @@
 
             // 清除哈希值，防止用户刷新或后退时再次触发
             // 使用 replaceState 避免在历史记录中留下 #shanbayReaderFinishAction
-            history.replaceState(null, '', location.pathname + location.search);
-            log('URL hash cleared.');
+            try {
+                 history.replaceState(null, '', location.pathname + location.search);
+                 log('URL hash cleared.');
+            } catch(e){
+                log('Could not clear hash using replaceState: ' + e);
+                // 备用方案：直接设置为空哈希，但会在历史记录留下一条
+                // location.hash = '';
+            }
         }
     }
 
     // --- 添加哈希变化监听器 (只添加一次) ---
-    // 检查是否已添加监听器，防止重复添加（虽然影响不大）
     if (!window.shanbayReaderHashListenerAdded) {
         window.addEventListener('hashchange', handleHashChange, false);
         window.shanbayReaderHashListenerAdded = true;
@@ -70,139 +83,357 @@
 
     // --- 主要逻辑：重建阅读模式内容 ---
     function restructureForReaderMode() {
-        log('Starting restructuring process (v0.9)...');
-
-        const marker = 'readerModeRestructured';
+        // **关键：在函数开头再次检查并设置标记，防止并发执行**
         if (document.body.dataset[marker]) {
-            log('Already restructured. Skipping.');
+            log('Restructure already running or completed. Skipping this call.');
             return;
         }
+        log('Starting restructuring process...');
+        document.body.dataset[marker] = 'true'; // **立即设置标记**
 
         const contentContainer = document.querySelector(config.contentContainerSelector);
         if (!contentContainer) {
-            log(`Error: Could not find content container: ${config.contentContainerSelector}`);
+            log('Error: Content container not found. Cannot restructure.');
+            delete document.body.dataset[marker]; // 出错时清除标记，允许下次重试
             return;
         }
 
-        // 1. 创建 <article>
+        // 1. 创建新的 <article> 容器
         const readerArticle = document.createElement('article');
         readerArticle.className = 'reader-mode-content-generated';
 
-        // 2. 添加标题
-        // ... [代码同 v0.8] ...
-        let titleText = document.title;
+        // 2. 寻找并添加标题
+        let titleText = document.title; // 默认用页面标题
         for (const selector of config.titleSelectors) {
-             const titleElement = document.querySelector(selector);
-             if (titleElement && titleElement.textContent.trim()) { titleText = titleElement.textContent.trim(); break; }
+            const titleElement = document.querySelector(selector);
+            if (titleElement && titleElement.textContent.trim()) {
+                titleText = titleElement.textContent.trim();
+                log(`Found title using selector: ${selector}`);
+                break;
+            }
         }
-        const heading = document.createElement('h1'); heading.textContent = titleText; readerArticle.appendChild(heading);
+        const heading = document.createElement('h1');
+        heading.textContent = titleText;
+        readerArticle.appendChild(heading); // 先添加标题
+        log(`Article Title set to: ${titleText}`);
 
-
-        // 3. 重建段落和标记
-        // ... [代码同 v0.8] ...
-        let paragraphContainers = contentContainer.querySelectorAll(config.paragraphSelector);
-        if (paragraphContainers.length === 0) { paragraphContainers = contentContainer.querySelectorAll('.para'); }
-        let paragraphsGenerated = 0;
-        paragraphContainers.forEach((paraContainer, paraIndex) => {
-             const pElement = document.createElement('p'); pElement.style.margin = '1em 0'; pElement.style.lineHeight = '1.6';
-             let contentAddedToParagraph = false;
-             const sentenceContainers = paraContainer.querySelectorAll(config.sentenceSelector);
-             if (sentenceContainers.length > 0) {
-                  sentenceContainers.forEach((sentenceContainer, sentenceIndex) => {
-                       sentenceContainer.childNodes.forEach(node => { /* ... 处理单词 b/u/标点/空格 ... */
-                            let nodeProcessed = false;
-                            if (node.nodeType === Node.ELEMENT_NODE && node.matches('span')) {
-                                const wordSpan = node.querySelector(config.wordSelector);
-                                if (wordSpan) { const wordText = wordSpan.textContent.trim(); if(wordText){ const isBold=wordSpan.classList.contains(config.boldClass); const isLearned=wordSpan.classList.contains(config.learnedClass); let wordElement=null; if(isBold&&isLearned){wordElement=document.createElement('b');const u=document.createElement('u');u.textContent=wordText;wordElement.appendChild(u);}else if(isBold){wordElement=document.createElement('b');wordElement.textContent=wordText;}else if(isLearned){wordElement=document.createElement('u');wordElement.textContent=wordText;}else{wordElement=document.createTextNode(wordText);} pElement.appendChild(wordElement); contentAddedToParagraph=true; nodeProcessed=true;} }
-                                else if (node.textContent.trim()===''&&contentAddedToParagraph&&pElement.lastChild&&(!pElement.lastChild.textContent||!pElement.lastChild.textContent.endsWith(' '))){pElement.appendChild(document.createTextNode(' '));nodeProcessed=true;}
-                            } else if (node.nodeType===Node.TEXT_NODE){ const punctuation=node.textContent.trim(); if(punctuation){ if(pElement.lastChild&&pElement.lastChild.nodeType===Node.TEXT_NODE&&pElement.lastChild.textContent.endsWith(' ')){pElement.lastChild.textContent=pElement.lastChild.textContent.trimEnd();} pElement.appendChild(document.createTextNode(punctuation)); contentAddedToParagraph=true; nodeProcessed=true;} else if(node.textContent.includes(' ')&&contentAddedToParagraph&&pElement.lastChild&&(!pElement.lastChild.textContent||!pElement.lastChild.textContent.endsWith(' '))){pElement.appendChild(document.createTextNode(' '));nodeProcessed=true;} }
-                            if(!nodeProcessed&&node.nodeType===Node.ELEMENT_NODE&&contentAddedToParagraph&&pElement.lastChild&&(!pElement.lastChild.textContent||!pElement.lastChild.textContent.endsWith(' '))){ if(node.textContent.includes(' ')){pElement.appendChild(document.createTextNode(' '));} }
-                       });
-                       if (sentenceIndex<sentenceContainers.length-1&&contentAddedToParagraph&&pElement.lastChild&&(!pElement.lastChild.textContent||!pElement.lastChild.textContent.endsWith(' '))) { pElement.appendChild(document.createTextNode(' ')); }
-                  });
-             }
-             if (contentAddedToParagraph && pElement.textContent.trim()) {
-                 if (pElement.lastChild && pElement.lastChild.nodeType === Node.TEXT_NODE && pElement.lastChild.textContent.endsWith(' ')) { pElement.lastChild.textContent = pElement.lastChild.textContent.trimEnd(); }
-                  if (pElement.textContent.trim()) { readerArticle.appendChild(pElement); paragraphsGenerated++; }
-             }
-        }); // end of paragraphs loop
-
-
-        log(`Generated ${paragraphsGenerated} paragraphs.`);
-
-        // 4. **添加触发链接 (替换之前的提示)**
+        // 3. 创建触发链接 (如果原始按钮存在)
+        let triggerLink = null; // 初始化为 null
         const originalButton = document.querySelector(config.originalFinishButtonSelector);
         if (originalButton) {
-            log('Original finish button found. Adding trigger link.');
-            const triggerLink = document.createElement('a');
+            log('Original finish button found. Creating trigger link.');
+            triggerLink = document.createElement('a');
             triggerLink.href = config.finishActionHash; // 指向特殊哈希
             triggerLink.textContent = originalButton.textContent.trim() || '完成阅读';
-            // 添加一些样式让它看起来像个链接/按钮
-            triggerLink.style.display = 'block';
-            triggerLink.style.marginTop = '2em';
-            triggerLink.style.padding = '10px';
-            triggerLink.style.border = '1px solid #007aff'; // 蓝色边框
-            triggerLink.style.borderRadius = '5px';
-            triggerLink.style.textAlign = 'center';
-            triggerLink.style.color = '#007aff'; // 蓝色文字
-            triggerLink.style.textDecoration = 'none';
-            triggerLink.style.fontWeight = 'bold';
-            triggerLink.style.maxWidth = '200px';
-            triggerLink.style.marginLeft = 'auto';
-            triggerLink.style.marginRight = 'auto';
+            // 调整样式，使其适合放在标题下方
+            triggerLink.style.cssText = `
+                display: block;
+                margin: 0.8em auto 1.5em auto; /* 上下边距 */
+                padding: 8px 12px;             /* 按钮内边距 */
+                border: 1px solid #007aff;     /* 边框颜色 (类似链接蓝) */
+                border-radius: 5px;            /* 圆角 */
+                text-align: center;            /* 文字居中 */
+                color: #007aff;                /* 文字颜色 */
+                text-decoration: none;         /* 去掉下划线 */
+                font-weight: bold;             /* 粗体 */
+                max-width: 180px;              /* 最大宽度 */
+                cursor: pointer;               /* 手型光标 */
+            `;
+            log('Trigger link created.');
 
-            readerArticle.appendChild(triggerLink);
-            log('Trigger link added.');
+            // 4. 将触发链接插入标题之后
+            // 使用 insertAdjacentElement 确保添加到 DOM 中
+            heading.insertAdjacentElement('afterend', triggerLink);
+            log('Trigger link inserted after heading.');
+
         } else {
             log('Original finish button not found. Cannot add trigger link.');
         }
 
-        // 5. 添加元数据
+        // 5. 查找所有段落容器并重建内容
+        let paragraphContainers = contentContainer.querySelectorAll(config.paragraphSelector);
+        // 如果直接子选择器找不到，尝试查找所有 .para 作为备用
+        if (paragraphContainers.length === 0) {
+            log(`Warning: No paragraph containers found using direct selector "${config.paragraphSelector}". Trying fallback ".para".`);
+            paragraphContainers = contentContainer.querySelectorAll('.para');
+             if (paragraphContainers.length === 0) {
+                 log(`Error: Still no paragraph containers found using fallback ".para". Content generation may fail.`);
+                 // 即使没有段落，也继续执行，至少标题和按钮能显示
+             }
+        }
+        log(`Found ${paragraphContainers.length} paragraph containers.`);
+        let paragraphsGenerated = 0;
+
+        paragraphContainers.forEach((paraContainer, paraIndex) => {
+            // 为每个原始段落创建一个新的 <p> 元素
+            const pElement = document.createElement('p');
+            pElement.style.margin = '1em 0'; // 保留一些基础样式
+            pElement.style.lineHeight = '1.6';
+            let contentAddedToParagraph = false; // 标记是否向段落添加了实际内容
+
+            // 在段落内查找句子容器
+            const sentenceContainers = paraContainer.querySelectorAll(config.sentenceSelector);
+
+            if (sentenceContainers.length > 0) {
+                // log(`Paragraph ${paraIndex + 1}: Found ${sentenceContainers.length} sentences. Rebuilding...`); // 可取消注释详细日志
+                sentenceContainers.forEach((sentenceContainer, sentenceIndex) => {
+                    // 遍历句子中的所有直接子节点 (包括单词span、空格span、标点文本节点等)
+                    sentenceContainer.childNodes.forEach(node => {
+                        let nodeProcessed = false; // 标记当前 node 是否被有效处理
+
+                        if (node.nodeType === Node.ELEMENT_NODE && node.matches('span')) {
+                            // A. 检查是否是包含单词信息的 span (内部可能还有 .word span)
+                            //    或者它本身就是 .word span (兼容两种结构)
+                            const wordSpan = node.matches(config.wordSelector) ? node : node.querySelector(config.wordSelector);
+                            if (wordSpan) {
+                                const wordText = wordSpan.textContent.trim();
+                                if (wordText) {
+                                    const isBold = wordSpan.classList.contains(config.boldClass);
+                                    const isLearned = wordSpan.classList.contains(config.learnedClass);
+                                    let wordElement = null; // 用于存放处理后的单词元素或文本节点
+
+                                    // 根据标记组合创建元素
+                                    if (isBold && isLearned) {
+                                        wordElement = document.createElement('b'); const u = document.createElement('u'); u.textContent = wordText; wordElement.appendChild(u);
+                                    } else if (isBold) {
+                                        wordElement = document.createElement('b'); wordElement.textContent = wordText;
+                                    } else if (isLearned) {
+                                        wordElement = document.createElement('u'); wordElement.textContent = wordText;
+                                    } else {
+                                        wordElement = document.createTextNode(wordText); // 普通单词直接是文本
+                                    }
+                                    pElement.appendChild(wordElement); // 添加到新段落
+                                    contentAddedToParagraph = true;
+                                    nodeProcessed = true;
+                                }
+                            }
+                            // B. 如果是空格 span (<span> </span>) 且前面已有内容
+                            else if (node.textContent.trim() === '' && contentAddedToParagraph) {
+                                // 只在已有内容后添加空格，且避免连续空格
+                                if (pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
+                                     pElement.appendChild(document.createTextNode(' '));
+                                     nodeProcessed = true;
+                                }
+                            }
+                        }
+                        // C. 如果是文本节点 (通常是标点符号)
+                        else if (node.nodeType === Node.TEXT_NODE) {
+                            const punctuation = node.textContent.trim();
+                            if (punctuation) {
+                                // 移除可能的前导空格 (如果上一个元素末尾有空格)
+                                if (pElement.lastChild && pElement.lastChild.nodeType === Node.TEXT_NODE && pElement.lastChild.textContent.endsWith(' ')) {
+                                    pElement.lastChild.textContent = pElement.lastChild.textContent.trimEnd();
+                                }
+                                pElement.appendChild(document.createTextNode(punctuation)); // 添加标点
+                                contentAddedToParagraph = true;
+                                nodeProcessed = true;
+                            }
+                            // D. 如果文本节点只包含空格，且前面有内容
+                            else if (node.textContent.includes(' ') && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
+                                pElement.appendChild(document.createTextNode(' ')); // 添加一个空格
+                                nodeProcessed = true;
+                            }
+                        }
+
+                        // E. 容错处理：如果节点未被处理且前面有内容，尝试添加空格以保持间距
+                        if (!nodeProcessed && node.nodeType === Node.ELEMENT_NODE && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
+                             // 检查这个未处理的节点是否真的代表一个空格间隙
+                             if (node.offsetWidth < 5 && node.offsetHeight < 5 && node.textContent.trim() === '') { // 启发式判断是否是间隔 span
+                                 pElement.appendChild(document.createTextNode(' '));
+                             }
+                        }
+
+                    }); // end of sentence childNodes loop
+
+                    // 在句子之间添加空格 (如果段落不是空的，并且不是最后一个句子)
+                    if (sentenceIndex < sentenceContainers.length - 1 && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
+                         pElement.appendChild(document.createTextNode(' '));
+                    }
+
+                }); // end of sentences loop
+            } else {
+                // 备用逻辑：如果段落内没有 .sentence 容器，尝试直接处理段落内容（效果可能较差）
+                 log(`Paragraph ${paraIndex + 1}: No sentence containers found. Trying direct text extraction (may lose formatting).`);
+                 let paraText = paraContainer.textContent.replace(/\s+/g, ' ').trim();
+                 // 尝试移除可能的笔记标记文本（如果存在）
+                 const noteFlag = paraContainer.querySelector('a.note-flag');
+                 if (noteFlag && noteFlag.textContent) {
+                     paraText = paraText.replace(noteFlag.textContent, '').trim();
+                 }
+                 if (paraText) {
+                     pElement.textContent = paraText; // 直接设置文本
+                     contentAddedToParagraph = true;
+                 }
+            }
+
+            // 将处理好的段落添加到 readerArticle 中，前提是它有实际内容
+            if (contentAddedToParagraph && pElement.textContent.trim()) {
+                // 清理段落末尾可能多余的空格
+                if (pElement.lastChild && pElement.lastChild.nodeType === Node.TEXT_NODE && pElement.lastChild.textContent.endsWith(' ')) {
+                    pElement.lastChild.textContent = pElement.lastChild.textContent.trimEnd();
+                }
+                 // 再次确保不是只有空格
+                 if (pElement.textContent.trim()) {
+                     readerArticle.appendChild(pElement);
+                     paragraphsGenerated++;
+                 } else {
+                     log(`Paragraph ${paraIndex + 1} resulted in empty or whitespace only after processing.`);
+                 }
+            } else {
+                 log(`Paragraph ${paraIndex + 1}: No content generated or added.`);
+            }
+        }); // end of paragraphs loop
+
+        log(`Generated ${paragraphsGenerated} paragraphs.`);
+
+        // 6. 添加必要的元数据 (帮助 Safari 识别)
         readerArticle.setAttribute('role', 'article');
         readerArticle.setAttribute('itemscope', '');
         readerArticle.setAttribute('itemtype', 'http://schema.org/Article');
         const headlineMeta = document.createElement('meta');
         headlineMeta.setAttribute('itemprop', 'headline');
         headlineMeta.setAttribute('content', heading.textContent);
-        if (readerArticle.firstChild) { readerArticle.insertBefore(headlineMeta, readerArticle.firstChild.nextSibling); }
-        else { readerArticle.appendChild(headlineMeta); }
+        // 插入元数据在标题或链接之后
+        const referenceNode = triggerLink || heading; // 获取标题或触发链接（哪个存在用哪个）
+        if (readerArticle.firstChild) { // 确保 article 不为空
+             if(referenceNode && referenceNode.nextSibling) { // 如果后面有节点，插在它前面
+                 readerArticle.insertBefore(headlineMeta, referenceNode.nextSibling);
+             } else { // 否则追加到末尾（理论上应该有段落）
+                 readerArticle.appendChild(headlineMeta);
+             }
+        } else { // 如果 article 为空（不太可能），直接添加
+            readerArticle.appendChild(headlineMeta);
+        }
 
-        // 6. 插入页面并隐藏原始内容
-        const parentOfOriginalContent = contentContainer.parentNode;
-        if (parentOfOriginalContent) {
-            parentOfOriginalContent.insertBefore(readerArticle, contentContainer);
-            log('Generated <article> injected.');
+        // 7. 将新生成的 <article> 插入到页面，并隐藏原始混乱的内容
+        const parentNode = contentContainer.parentNode;
+        if (parentNode) {
+            // 将新结构插入到原始内容容器之前
+            parentNode.insertBefore(readerArticle, contentContainer);
+            log('Generated <article> injected into the page.');
+            // 隐藏原始结构
             contentContainer.style.display = 'none';
             log('Original content container hidden.');
         } else {
-            log('Error: Could not find parent node. Appending to body fallback.');
+            log('Error: Could not find parent node of the content container. Appending to body as fallback.');
+            // 备用方案：添加到 body 开头，但可能样式不理想
             document.body.prepend(readerArticle);
         }
 
-        document.body.dataset[marker] = 'true';
-        log('Restructuring complete (v0.9).');
+        log('Restructuring complete.');
+        // **不要在这里清除标记，标记表示脚本已成功完成**
     }
 
-    // --- 执行脚本 ---
-    // ... [MutationObserver 和 tryRun 代码同 v0.8] ...
-     const observer = new MutationObserver((mutationsList, obs) => {
-         const targetContent = document.querySelector(config.contentContainerSelector);
-         if (targetContent && !document.body.dataset.readerModeRestructured) {
-             log('Content container detected via MutationObserver. Running restructuring...');
-             setTimeout(restructureForReaderMode, 500);
-             // obs.disconnect();
-         }
-     });
-     observer.observe(document.body, { childList: true, subtree: true });
-     function tryRun() {
-         if (document.querySelector(config.contentContainerSelector) && !document.body.dataset.readerModeRestructured) {
-             log('Content container found on initial check. Running restructuring...');
-             setTimeout(restructureForReaderMode, 500);
-         } else {
-             log('Content container not found yet or already restructured.');
-         }
-     }
-     if (document.readyState === 'complete' || document.readyState === 'interactive') { tryRun(); }
-     else { window.addEventListener('DOMContentLoaded', tryRun); window.addEventListener('load', tryRun); }
+
+    // --- 启动检查和监听机制 ---
+    let checkAttempts = 0;
+    let initialCheckInterval = null;
+    let observer = null; // 将 observer 移到外部作用域，以便可以 disconnect
+
+    // 核心检查函数：检查元素是否就绪且脚本未运行
+    function mainExecutionCheck() {
+        // 检查脚本是否已运行
+        if (document.body.dataset[marker]) {
+            log('Script has already run. Stopping checks.');
+            if (initialCheckInterval) clearInterval(initialCheckInterval);
+            if (observer) { try { observer.disconnect(); } catch(e){} } // 确保停止观察
+            return true; // 表示已运行
+        }
+
+        // 检查所需的核心元素是否存在
+        const contentContainer = document.querySelector(config.contentContainerSelector);
+        // **增加更严格的检查：确保内容容器内至少有一个段落容器**
+        const paragraphsExist = contentContainer ? contentContainer.querySelector(config.paragraphSelector) || contentContainer.querySelector('.para') : null;
+
+        if (contentContainer && paragraphsExist) {
+            log('Required elements found. Proceeding with restructuring.');
+            if (initialCheckInterval) clearInterval(initialCheckInterval); // 停止轮询
+            if (observer) { try { observer.disconnect(); } catch(e){} } // 停止观察
+            restructureForReaderMode(); // 直接执行，内部有重复执行检查
+            return true; // 表示成功执行
+        }
+
+        return false; // 表示元素未就绪
+    }
+
+    // 1. 初始轮询检查 (作为安全网)
+    function startInitialCheck() {
+        // 如果脚本已运行，则不启动轮询
+        if (document.body.dataset[marker]) {
+            log('Initial check skipped: script already marked as run.');
+            return;
+        }
+        log('Starting initial polling check...');
+        initialCheckInterval = setInterval(() => {
+            checkAttempts++;
+            log(`Initial check attempt ${checkAttempts}/${config.maxCheckAttempts}...`);
+            // 调用核心检查函数
+            if (mainExecutionCheck() || checkAttempts >= config.maxCheckAttempts) {
+                clearInterval(initialCheckInterval); // 停止轮询
+                if (checkAttempts >= config.maxCheckAttempts && !document.body.dataset[marker]) {
+                    log('Initial check timed out. Relying on MutationObserver (if active).');
+                } else if (document.body.dataset[marker]) {
+                    log('Restructuring initiated by initial check.');
+                }
+            }
+        }, config.checkInterval);
+    }
+
+    // 2. MutationObserver (主要方法，监听 DOM 变化)
+    function startMutationObserver() {
+        // 如果脚本已运行，或观察者已存在，则不启动
+        if (document.body.dataset[marker] || observer) {
+            log('MutationObserver skipped: script already marked as run or observer exists.');
+            return;
+        }
+        log('Starting MutationObserver...');
+        observer = new MutationObserver((mutationsList, obs) => {
+            // 不需要处理 mutationsList，直接检查状态
+            log('Mutation detected. Running check...');
+
+            // 检查是否已运行或元素是否就绪
+            if (mainExecutionCheck()) {
+                // 如果检查成功（意味着元素就绪且 restructureForReaderMode 已被调用）
+                // mainExecutionCheck 内部会 disconnect observer，这里不需要再做
+                log('Elements ready or script already run after mutation. Observer should be disconnected by main check.');
+            } else {
+                // log('Mutation detected, but required elements not yet ready.'); // 可选日志
+            }
+        });
+
+        // 观察整个 body 的子节点添加/删除 和 子树变化
+        observer.observe(document.body, {
+            childList: true,  // 监视子节点的添加或删除
+            subtree: true     // 监视所有后代节点
+        });
+        log('MutationObserver is now observing.');
+    }
+
+    // --- 执行启动 ---
+    // 等待 DOM 基本就绪后再开始检查和观察
+    function initializeScript() {
+        log('Initializing script checks...');
+        // 执行一次初始检查，可能页面加载很快，元素已存在
+        if (!mainExecutionCheck()) {
+            // 如果初始检查未成功，则启动轮询和观察者
+            startInitialCheck();
+            startMutationObserver();
+        } else {
+             log('Elements were ready on initial check.');
+        }
+    }
+
+    // 根据文档加载状态决定何时初始化
+    if (document.readyState === 'loading') {
+         // 等待 DOMContentLoaded
+        document.addEventListener('DOMContentLoaded', () => {
+            log('DOMContentLoaded event fired.');
+            initializeScript();
+        });
+    } else {
+        // 如果 DOMContentLoaded 已经发生 (interactive 或 complete)
+        log('DOMContentLoaded already fired or state is interactive/complete.');
+        initializeScript();
+    }
 
 })();
