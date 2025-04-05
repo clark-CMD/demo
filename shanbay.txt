@@ -1,131 +1,301 @@
 // ==UserScript==
-// @name         Shanbay Safari Reader Mode Enabler
+// @name         扇贝阅读 Safari 阅读模式优化 v0.6 (保留加粗和下划线)
 // @namespace    http://tampermonkey.net/
-// @version      0.1
-// @description  Make Shanbay articles compatible with Safari's Reader Mode
-// @author       You
+// @version      0.6
+// @description  精确重建扇贝阅读文章内容，修复 Safari 阅读模式乱码，保留重点词加粗(b)和已学词下划线(u)。
+// @author       Your Name & Claude
 // @match        https://web.shanbay.com/reading/web-news/articles/*
-// @match        https://web.shanbay.com/*
 // @grant        none
+// @run-at       document-idle
 // ==/UserScript==
 
 (function() {
     'use strict';
-    
-    function makeReaderModeCompatible() {
-        // Create a new article element if one doesn't already exist
-        let articleElement = document.querySelector('article');
-        if (!articleElement) {
-            articleElement = document.createElement('article');
-            articleElement.className = 'reader-mode-article';
-            
-            // Find the main content container
-            const articleBody = document.querySelector('.article-body') || 
-                                document.querySelector('.app-main') ||
-                                document.querySelector('.page-content');
-            
-            if (!articleBody) {
-                console.log('Could not find article body');
+
+    // --- 配置 ---
+    const config = {
+        paragraphSelector: '.article-content > .para',
+        sentenceSelector: '.sentence',
+        wordSelector: '.word', // 选择器以找到包含状态类的单词 span
+        boldClass: 'word-bold', // 加粗单词的 class
+        learnedClass: 'learned', // 已学单词的 class
+        titleSelectors: ['h2.article-title', '.article-header h2', 'h1', 'h2'],
+        contentContainerSelector: '.article-content',
+        debug: true
+    };
+
+    // --- 工具函数 ---
+    function log(message) {
+        if (config.debug) {
+            console.log('[Shanbay Reader Mode Fix v0.6] ' + message);
+        }
+    }
+
+    // --- 主要逻辑 ---
+    function restructureForReaderMode() {
+        log('Starting restructuring process (v0.6)...');
+
+        const marker = 'readerModeRestructured';
+        if (document.body.dataset[marker]) {
+            log('Already restructured. Skipping.');
+            return;
+        }
+
+        const contentContainer = document.querySelector(config.contentContainerSelector);
+        if (!contentContainer) {
+            log(`Error: Could not find content container: ${config.contentContainerSelector}`);
+            return;
+        }
+
+        // 1. 创建新的 <article> 容器
+        const readerArticle = document.createElement('article');
+        readerArticle.className = 'reader-mode-content-generated';
+
+        // 2. 寻找并添加标题
+        let titleText = document.title;
+        for (const selector of config.titleSelectors) {
+            const titleElement = document.querySelector(selector);
+            if (titleElement && titleElement.textContent.trim()) {
+                titleText = titleElement.textContent.trim();
+                log(`Found title using selector: ${selector}`);
+                break;
+            }
+        }
+        const heading = document.createElement('h1');
+        heading.textContent = titleText;
+        readerArticle.appendChild(heading);
+        log(`Article Title set to: ${titleText}`);
+
+        // 3. 查找所有段落容器
+        let paragraphContainers = contentContainer.querySelectorAll(config.paragraphSelector);
+        if (paragraphContainers.length === 0) {
+            log(`Warning: No paragraph containers found using direct selector. Trying fallback.`);
+            paragraphContainers = contentContainer.querySelectorAll('.para');
+            if (paragraphContainers.length === 0) {
+                log(`Error: Still no paragraph containers found. Aborting.`);
                 return;
             }
-            
-            // Find the title
-            const titleElement = document.querySelector('h2') || document.querySelector('h1');
-            let title = '';
-            if (titleElement) {
-                title = titleElement.textContent;
-            }
-            
-            // Create a proper heading structure
-            const heading = document.createElement('h1');
-            heading.textContent = title || document.title;
-            articleElement.appendChild(heading);
-            
-            // Extract the main article content
-            const contentContainers = document.querySelectorAll('.article-content, .para');
-            
-            if (contentContainers.length > 0) {
-                // Process each paragraph in the content
-                contentContainers.forEach(container => {
-                    // Create a clean paragraph without the word-by-word spans
-                    const paragraph = document.createElement('p');
-                    paragraph.textContent = container.textContent;
-                    paragraph.style.fontSize = '16px';
-                    paragraph.style.lineHeight = '1.6';
-                    paragraph.style.margin = '1em 0';
-                    articleElement.appendChild(paragraph);
-                });
+        } else {
+            log(`Found ${paragraphContainers.length} paragraph containers.`);
+        }
+
+        let paragraphsGenerated = 0;
+
+        // 4. 遍历每个段落容器
+        paragraphContainers.forEach((paraContainer, paraIndex) => {
+            const pElement = document.createElement('p');
+            pElement.style.margin = '1em 0';
+            pElement.style.lineHeight = '1.6';
+            let contentAddedToParagraph = false; // 标记是否向段落添加了实际内容
+
+            // 5. 在段落内查找句子容器
+            const sentenceContainers = paraContainer.querySelectorAll(config.sentenceSelector);
+
+            if (sentenceContainers.length > 0) {
+                log(`Paragraph ${paraIndex + 1}: Found ${sentenceContainers.length} sentences. Rebuilding with bold/underline preservation...`);
+                sentenceContainers.forEach((sentenceContainer, sentenceIndex) => {
+                    // 6. 遍历句子中的所有直接子节点
+                    sentenceContainer.childNodes.forEach(node => {
+                        let nodeProcessed = false; // 标记当前 node 是否被处理
+
+                        if (node.nodeType === Node.ELEMENT_NODE && node.matches('span')) {
+                            // A. 查找内部的 .word span
+                            const wordSpan = node.querySelector(config.wordSelector);
+                            if (wordSpan) {
+                                const wordText = wordSpan.textContent.trim();
+                                if (wordText) {
+                                    const isBold = wordSpan.classList.contains(config.boldClass);
+                                    const isLearned = wordSpan.classList.contains(config.learnedClass);
+                                    let wordElement = null;
+
+                                    if (isBold && isLearned) {
+                                        // 粗体 + 下划线
+                                        wordElement = document.createElement('b');
+                                        const underlineElement = document.createElement('u');
+                                        underlineElement.textContent = wordText;
+                                        wordElement.appendChild(underlineElement);
+                                        // log(`  Added bold & underlined word: ${wordText}`);
+                                    } else if (isBold) {
+                                        // 仅粗体
+                                        wordElement = document.createElement('b');
+                                        wordElement.textContent = wordText;
+                                        // log(`  Added bold word: ${wordText}`);
+                                    } else if (isLearned) {
+                                        // 仅下划线
+                                        wordElement = document.createElement('u');
+                                        wordElement.textContent = wordText;
+                                        // log(`  Added underlined word: ${wordText}`);
+                                    } else {
+                                        // 普通单词 (创建文本节点)
+                                        wordElement = document.createTextNode(wordText);
+                                        // log(`  Added normal word: ${wordText}`);
+                                    }
+                                    pElement.appendChild(wordElement);
+                                    contentAddedToParagraph = true;
+                                    nodeProcessed = true;
+                                }
+                            }
+                            // B. 如果是空格 span (<span> </span>)
+                            else if (node.textContent.trim() === '' && contentAddedToParagraph) {
+                                // 只在已有内容后添加空格，且避免连续空格
+                                if (pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
+                                     pElement.appendChild(document.createTextNode(' '));
+                                     nodeProcessed = true;
+                                }
+                            }
+                        }
+                        // C. 如果是文本节点 (通常是标点符号)
+                        else if (node.nodeType === Node.TEXT_NODE) {
+                            const punctuation = node.textContent.trim();
+                            if (punctuation) {
+                                // 移除可能的前导空格
+                                if (pElement.lastChild && pElement.lastChild.nodeType === Node.TEXT_NODE && pElement.lastChild.textContent.endsWith(' ')) {
+                                    pElement.lastChild.textContent = pElement.lastChild.textContent.trimEnd();
+                                }
+                                pElement.appendChild(document.createTextNode(punctuation));
+                                contentAddedToParagraph = true;
+                                nodeProcessed = true;
+                                // log(`  Added punctuation: ${punctuation}`);
+                            } else if (node.textContent.includes(' ') && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
+                                // 如果文本节点只包含空格，也添加一个空格
+                                pElement.appendChild(document.createTextNode(' '));
+                                nodeProcessed = true;
+                            }
+                        }
+                        // D. 处理未被明确处理的节点（比如内部没有.word的span），只添加空格，避免丢失间距
+                        if (!nodeProcessed && node.nodeType === Node.ELEMENT_NODE && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
+                             if (node.textContent.includes(' ')) { // 如果节点内容包含空格，添加一个
+                                 pElement.appendChild(document.createTextNode(' '));
+                             }
+                        }
+
+                    }); // end of sentence childNodes loop
+
+                    // 在句子之间添加空格
+                    if (sentenceIndex < sentenceContainers.length - 1 && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
+                         pElement.appendChild(document.createTextNode(' '));
+                    }
+
+                }); // end of sentences loop
             } else {
-                // If we can't find specific content containers, look for paragraphs
-                const sentences = [];
-                const sentenceElements = document.querySelectorAll('.sentence');
-                sentenceElements.forEach(sentence => {
-                    sentences.push(sentence.textContent);
-                });
-                
-                if (sentences.length > 0) {
-                    const paragraph = document.createElement('p');
-                    paragraph.textContent = sentences.join(' ');
-                    paragraph.style.fontSize = '16px';
-                    paragraph.style.lineHeight = '1.6';
-                    paragraph.style.margin = '1em 0';
-                    articleElement.appendChild(paragraph);
-                }
+                // 备用逻辑：如果段落内没有句子容器
+                 log(`Paragraph ${paraIndex + 1}: No sentence containers found. Trying direct rebuild (less reliable).`);
+                 paraContainer.childNodes.forEach(node => {
+                      if (node.nodeType === Node.ELEMENT_NODE && node.matches('span')) {
+                           const wordSpan = node.querySelector(config.wordSelector);
+                           if (wordSpan) {
+                               const wordText = wordSpan.textContent.trim();
+                               if (wordText) {
+                                    const isBold = wordSpan.classList.contains(config.boldClass);
+                                    const isLearned = wordSpan.classList.contains(config.learnedClass);
+                                    let wordElement = null;
+                                    if (isBold && isLearned) { wordElement = document.createElement('b'); const u = document.createElement('u'); u.textContent = wordText; wordElement.appendChild(u); }
+                                    else if (isBold) { wordElement = document.createElement('b'); wordElement.textContent = wordText; }
+                                    else if (isLearned) { wordElement = document.createElement('u'); wordElement.textContent = wordText; }
+                                    else { wordElement = document.createTextNode(wordText); }
+                                    pElement.appendChild(wordElement);
+                                    contentAddedToParagraph = true;
+                                    // 添加空格
+                                    if (pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
+                                          pElement.appendChild(document.createTextNode(' '));
+                                     }
+                               }
+                           }
+                      } else if (node.nodeType === Node.TEXT_NODE) {
+                           const text = node.textContent.replace(/\s+/g, ' ').trim();
+                            if (text) {
+                                 // 移除前导空格
+                                 if (pElement.lastChild && pElement.lastChild.nodeType === Node.TEXT_NODE && pElement.lastChild.textContent.endsWith(' ')) {
+                                     pElement.lastChild.textContent = pElement.lastChild.textContent.trimEnd();
+                                 }
+                                 pElement.appendChild(document.createTextNode(text + ' ')); // 标点后加空格
+                                 contentAddedToParagraph = true;
+                            }
+                      }
+                 });
             }
-            
-            // Add the article element to the document
-            const mainContainer = document.querySelector('.app-content-container') || 
-                                 document.querySelector('.page-content') || 
-                                 document.body;
-            
-            mainContainer.prepend(articleElement);
-            
-            // Add required metadata for Reader Mode
-            articleElement.setAttribute('role', 'article');
-            articleElement.setAttribute('itemscope', '');
-            articleElement.setAttribute('itemtype', 'http://schema.org/Article');
-            
-            // Make sure we have enough content for Reader Mode to recognize
-            ensureMinimumContentLength(articleElement);
+
+            // 7. 添加段落到文章，如果它有实际内容
+            if (contentAddedToParagraph && pElement.textContent.trim()) {
+                // 清理段落末尾可能多余的空格
+                if (pElement.lastChild && pElement.lastChild.nodeType === Node.TEXT_NODE && pElement.lastChild.textContent.endsWith(' ')) {
+                    pElement.lastChild.textContent = pElement.lastChild.textContent.trimEnd();
+                }
+                 if (pElement.textContent.trim()) { // 再次检查确保不是只有空格
+                     readerArticle.appendChild(pElement);
+                     paragraphsGenerated++;
+                     log(`Paragraph ${paraIndex + 1} generated.`);
+                 } else {
+                      log(`Paragraph ${paraIndex + 1} resulted in empty or whitespace only after processing.`);
+                 }
+            } else {
+                 log(`Paragraph ${paraIndex + 1}: No content generated or added.`);
+            }
+        }); // end of paragraphs loop
+
+        // ... [后续的添加元数据、插入页面、隐藏原始内容、标记处理的代码保持不变] ...
+
+        // 10. 检查是否生成了有效内容
+        if (paragraphsGenerated === 0) {
+            log('Error: Failed to generate any paragraph content. Aborting injection.');
+            return;
+        }
+
+        // 11. 添加必要的元数据
+        readerArticle.setAttribute('role', 'article');
+        readerArticle.setAttribute('itemscope', '');
+        readerArticle.setAttribute('itemtype', 'http://schema.org/Article');
+        const headlineMeta = document.createElement('meta');
+        headlineMeta.setAttribute('itemprop', 'headline');
+        headlineMeta.setAttribute('content', heading.textContent);
+        if (readerArticle.firstChild) {
+            readerArticle.insertBefore(headlineMeta, readerArticle.firstChild.nextSibling);
+        } else {
+            readerArticle.appendChild(headlineMeta);
+        }
+
+        // 12. 插入页面并隐藏原始内容
+        const parentOfOriginalContent = contentContainer.parentNode;
+        if (parentOfOriginalContent) {
+            parentOfOriginalContent.insertBefore(readerArticle, contentContainer);
+            log('Generated <article> injected.');
+            contentContainer.style.display = 'none';
+            log('Original content container hidden.');
+        } else {
+            log('Error: Could not find parent node. Appending to body fallback.');
+            document.body.prepend(readerArticle);
+        }
+
+        document.body.dataset[marker] = 'true';
+        log('Restructuring complete (v0.6).');
+    }
+
+    // --- 执行脚本 ---
+    const observer = new MutationObserver((mutationsList, obs) => {
+        const targetContent = document.querySelector(config.contentContainerSelector);
+        if (targetContent && !document.body.dataset.readerModeRestructured) {
+            log('Content container detected via MutationObserver. Running restructuring...');
+            setTimeout(restructureForReaderMode, 500);
+            // obs.disconnect(); // Consider disconnecting
+        }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    function tryRun() {
+        if (document.querySelector(config.contentContainerSelector) && !document.body.dataset.readerModeRestructured) {
+            log('Content container found on initial check. Running restructuring...');
+            setTimeout(restructureForReaderMode, 500);
+        } else {
+            log('Content container not found yet or already restructured.');
         }
     }
-    
-    function ensureMinimumContentLength(articleElement) {
-        // Reader Mode typically needs several paragraphs of content
-        const paragraphs = articleElement.querySelectorAll('p');
-        if (paragraphs.length < 3) {
-            // Extract text from the entire page
-            const allText = document.body.textContent;
-            const cleanText = allText.replace(/\s+/g, ' ').trim();
-            
-            // Split into sentences
-            const sentences = cleanText.split(/[.!?]+/);
-            
-            // Create at least 3 paragraphs
-            for (let i = 0; i < 3; i++) {
-                const startIdx = i * 3;
-                const endIdx = startIdx + 3;
-                const paragraphText = sentences.slice(startIdx, endIdx).join('. ');
-                
-                if (paragraphText.trim().length > 20) {
-                    const p = document.createElement('p');
-                    p.textContent = paragraphText + '.';
-                    p.style.fontSize = '16px';
-                    p.style.lineHeight = '1.6';
-                    p.style.margin = '1em 0';
-                    articleElement.appendChild(p);
-                }
-            }
-        }
-    }
-    
-    // Run the script after the page has loaded
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', makeReaderModeCompatible);
+
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        tryRun();
     } else {
-        makeReaderModeCompatible();
+        window.addEventListener('DOMContentLoaded', tryRun);
+        window.addEventListener('load', tryRun);
     }
-    
-    // Also run after a delay for dynamically loaded content
-    setTimeout(makeReaderModeCompatible, 1500);
+
 })();
