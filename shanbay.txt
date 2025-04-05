@@ -1,18 +1,18 @@
 // ==UserScript==
-// @name         扇贝阅读增强 - 阅读模式 (基于HTML源码优化)
+// @name         扇贝阅读增强 - 阅读模式 (支持 reading.shanbay & web.shanbay)
 // @namespace    http://tampermonkey.net/
-// @version      0.2
-// @description  在扇贝阅读页面添加阅读模式，基于用户提供的HTML源码优化
+// @version      0.3
+// @description  在扇贝阅读页面 (reading.shanbay.com 和 web.shanbay.com) 添加阅读模式
 // @author       You
 // @match        https://reading.shanbay.com/reader/articles/*
-// @match        https://web.shanbay.com/reading/articles/*
+// @match        https://web.shanbay.com/*  // 新增：匹配 web.shanbay.com 下的所有页面
 // @grant        GM_addStyle
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    // 阅读模式样式 (与之前版本相同)
+    // --- 样式代码 (保持不变) ---
     GM_addStyle(`
         #shanbay-reading-mode-container {
             position: fixed;
@@ -27,19 +27,14 @@
             padding: 20px;
             font-size: 16px;
             line-height: 1.6;
-            font-family: sans-serif; /* 修改字体 */
+            font-family: sans-serif;
         }
-
         #shanbay-reading-mode-title {
             font-size: 24px;
             font-weight: bold;
             margin-bottom: 20px;
         }
-
-        #shanbay-reading-mode-content {
-            /* 可以添加更多样式来优化文章内容 */
-        }
-
+        #shanbay-reading-mode-content { }
         #shanbay-reading-mode-close-button {
             position: absolute;
             top: 10px;
@@ -53,9 +48,15 @@
         }
     `);
 
-    // 创建阅读模式按钮 (与之前版本相同)
+    // --- 创建按钮函数 (保持不变) ---
     function createReadingModeButton() {
+        // 检查页面上是否已经有按钮，避免重复添加 (可选优化)
+        if (document.getElementById('shanbay-reading-mode-toggle-button')) {
+            return;
+        }
+
         let button = document.createElement('button');
+        button.id = 'shanbay-reading-mode-toggle-button'; // 给按钮加个ID，方便查找
         button.textContent = '阅读模式';
         button.style.position = 'fixed';
         button.style.top = '20px';
@@ -72,22 +73,33 @@
         document.body.appendChild(button);
     }
 
-    // 打开阅读模式 (更新了CSS选择器)
+    // --- 打开阅读模式函数 (核心逻辑，选择器可能需要为 web.shanbay.com 适配) ---
     function openReadingMode() {
-        // 基于提供的HTML源码，更精确地选择文章标题和内容
-        let titleElement = document.querySelector('.article-body h2'); //  文章标题在 .article-body 下的 <h2> 标签中
-        let contentElement = document.querySelector('.article-content'); // 文章内容在 class 为 article-content 的 div 中
+        // !!! 这里的选择器是基于 reading.shanbay.com 的，可能不适用于 web.shanbay.com !!!
+        let titleElement = document.querySelector('.article-body h2');
+        let contentElement = document.querySelector('.article-content');
 
-        // 如果找不到标题或内容，则返回 (与之前版本相同)
+        // 尝试为 web.shanbay.com 添加备选选择器 (如果知道结构的话)
+        // 例如:
+        // if (!titleElement) { titleElement = document.querySelector('.web-article-title'); }
+        // if (!contentElement) { contentElement = document.querySelector('.web-article-main-content'); }
+        // 目前不知道 web.shanbay.com 的结构，所以先保持原样
+
         if (!titleElement || !contentElement) {
-            alert('无法找到文章标题或内容，请检查页面结构。');
+            // 检查是否在 web.shanbay.com 上，如果是，可以给更具体的提示
+            if (window.location.hostname === 'web.shanbay.com') {
+                 alert('无法在当前 web.shanbay.com 页面找到文章标题或内容。请检查此页面的HTML结构，并联系脚本作者更新选择器。');
+            } else {
+                 alert('无法找到文章标题或内容，请检查页面结构。');
+            }
             return;
         }
 
         let title = titleElement.textContent;
-        let content = contentElement.innerHTML;
+        // 获取内容时，可以尝试克隆节点，避免影响原页面交互（如果需要的话）
+        let contentHTML = contentElement.innerHTML;
 
-        // 创建阅读模式容器、标题、内容、关闭按钮 (与之前版本相同)
+        // --- 创建阅读模式容器等 (保持不变) ---
         let container = document.createElement('div');
         container.id = 'shanbay-reading-mode-container';
 
@@ -98,7 +110,7 @@
 
         let contentDiv = document.createElement('div');
         contentDiv.id = 'shanbay-reading-mode-content';
-        contentDiv.innerHTML = content;
+        contentDiv.innerHTML = contentHTML; // 使用获取到的内容
         container.appendChild(contentDiv);
 
         let closeButton = document.createElement('div');
@@ -107,11 +119,10 @@
         closeButton.addEventListener('click', closeReadingMode);
         container.appendChild(closeButton);
 
-        // 添加到页面 (与之前版本相同)
         document.body.appendChild(container);
     }
 
-    // 关闭阅读模式 (与之前版本相同)
+    // --- 关闭阅读模式函数 (保持不变) ---
     function closeReadingMode() {
         let container = document.getElementById('shanbay-reading-mode-container');
         if (container) {
@@ -119,6 +130,28 @@
         }
     }
 
-    // 初始化 (与之前版本相同)
-    createReadingModeButton();
+    // --- 初始化：延迟执行或等待页面加载完成可能更稳妥 ---
+    // 有些页面内容可能是动态加载的，直接执行可能找不到元素
+    // 可以尝试延迟一点执行，或者使用更高级的方法监听DOM变化
+    setTimeout(createReadingModeButton, 1000); // 延迟1秒创建按钮，给页面加载留点时间
+
+    // 或者使用 window.onload
+    // window.onload = createReadingModeButton;
+
+    // 对于动态加载内容的页面，MutationObserver 是更可靠的方式，但更复杂
+    // let targetNode = document.body;
+    // let config = { childList: true, subtree: true };
+    // let callback = function(mutationsList, observer) {
+    //     // 检查目标元素是否出现，如果出现则创建按钮并断开观察
+    //     if (document.querySelector('.article-body h2') && document.querySelector('.article-content')) {
+    //          if (!document.getElementById('shanbay-reading-mode-toggle-button')) {
+    //               createReadingModeButton();
+    //          }
+    //         // observer.disconnect(); // 如果只需要创建一次，可以断开
+    //     }
+    // };
+    // let observer = new MutationObserver(callback);
+    // observer.observe(targetNode, config);
+
+
 })();
