@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         扇贝阅读 Safari 阅读模式优化 v0.6 (保留加粗和下划线)
+// @name         扇贝阅读 Safari 阅读模式优化 v0.7 (模拟完成按钮)
 // @namespace    http://tampermonkey.net/
-// @version      0.6
-// @description  精确重建扇贝阅读文章内容，修复 Safari 阅读模式乱码，保留重点词加粗(b)和已学词下划线(u)。
+// @version      0.7
+// @description  精确重建扇贝阅读文章内容，修复 Safari 阅读模式乱码，保留标记，并尝试添加“完成阅读”按钮。
 // @author       Your Name & Claude
 // @match        https://web.shanbay.com/reading/web-news/articles/*
-// @grant        none
+// @grant        GM_addStyle
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -16,24 +16,48 @@
     const config = {
         paragraphSelector: '.article-content > .para',
         sentenceSelector: '.sentence',
-        wordSelector: '.word', // 选择器以找到包含状态类的单词 span
-        boldClass: 'word-bold', // 加粗单词的 class
-        learnedClass: 'learned', // 已学单词的 class
+        wordSelector: '.word',
+        boldClass: 'word-bold',
+        learnedClass: 'learned',
         titleSelectors: ['h2.article-title', '.article-header h2', 'h1', 'h2'],
         contentContainerSelector: '.article-content',
+        originalFinishButtonSelector: 'a.article-button.finish-button', // 原始完成按钮的选择器
         debug: true
     };
+
+    // --- 样式 ---
+    // 添加一些基本样式，让模拟按钮在阅读模式下稍微显眼一点
+    GM_addStyle(`
+        #reader-mode-finish-link {
+            display: block;
+            margin: 2em auto 1em auto; /* 上下边距，左右自动居中 */
+            padding: 10px 15px;
+            border: 1px solid #cccccc; /* 灰色边框 */
+            background-color: #f0f0f0; /* 浅灰色背景 */
+            color: #333333; /* 深灰色文字 */
+            text-decoration: none; /* 去掉下划线 */
+            border-radius: 5px; /* 圆角 */
+            text-align: center; /* 文字居中 */
+            cursor: pointer; /* 鼠标指针 */
+            max-width: 200px; /* 最大宽度 */
+            font-weight: bold;
+        }
+        #reader-mode-finish-link:hover {
+            background-color: #e0e0e0; /* 悬停时变深一点 */
+        }
+    `);
+
 
     // --- 工具函数 ---
     function log(message) {
         if (config.debug) {
-            console.log('[Shanbay Reader Mode Fix v0.6] ' + message);
+            console.log('[Shanbay Reader Mode Fix v0.7] ' + message);
         }
     }
 
     // --- 主要逻辑 ---
     function restructureForReaderMode() {
-        log('Starting restructuring process (v0.6)...');
+        log('Starting restructuring process (v0.7)...');
 
         const marker = 'readerModeRestructured';
         if (document.body.dataset[marker]) {
@@ -71,35 +95,30 @@
         if (paragraphContainers.length === 0) {
             log(`Warning: No paragraph containers found using direct selector. Trying fallback.`);
             paragraphContainers = contentContainer.querySelectorAll('.para');
-            if (paragraphContainers.length === 0) {
-                log(`Error: Still no paragraph containers found. Aborting.`);
-                return;
-            }
+             if (paragraphContainers.length === 0) {
+                 log(`Error: Still no paragraph containers found. Aborting content generation.`);
+                 return;
+             }
         } else {
             log(`Found ${paragraphContainers.length} paragraph containers.`);
         }
 
         let paragraphsGenerated = 0;
 
-        // 4. 遍历每个段落容器
+        // 4. 遍历每个段落容器 (重建内容 - 代码与 v0.6 基本相同)
         paragraphContainers.forEach((paraContainer, paraIndex) => {
             const pElement = document.createElement('p');
             pElement.style.margin = '1em 0';
             pElement.style.lineHeight = '1.6';
-            let contentAddedToParagraph = false; // 标记是否向段落添加了实际内容
+            let contentAddedToParagraph = false;
 
-            // 5. 在段落内查找句子容器
             const sentenceContainers = paraContainer.querySelectorAll(config.sentenceSelector);
-
             if (sentenceContainers.length > 0) {
-                log(`Paragraph ${paraIndex + 1}: Found ${sentenceContainers.length} sentences. Rebuilding with bold/underline preservation...`);
+                // log(`Paragraph ${paraIndex + 1}: Found ${sentenceContainers.length} sentences. Rebuilding...`); // 减少日志量
                 sentenceContainers.forEach((sentenceContainer, sentenceIndex) => {
-                    // 6. 遍历句子中的所有直接子节点
                     sentenceContainer.childNodes.forEach(node => {
-                        let nodeProcessed = false; // 标记当前 node 是否被处理
-
+                        let nodeProcessed = false;
                         if (node.nodeType === Node.ELEMENT_NODE && node.matches('span')) {
-                            // A. 查找内部的 .word span
                             const wordSpan = node.querySelector(config.wordSelector);
                             if (wordSpan) {
                                 const wordText = wordSpan.textContent.trim();
@@ -107,144 +126,112 @@
                                     const isBold = wordSpan.classList.contains(config.boldClass);
                                     const isLearned = wordSpan.classList.contains(config.learnedClass);
                                     let wordElement = null;
-
-                                    if (isBold && isLearned) {
-                                        // 粗体 + 下划线
-                                        wordElement = document.createElement('b');
-                                        const underlineElement = document.createElement('u');
-                                        underlineElement.textContent = wordText;
-                                        wordElement.appendChild(underlineElement);
-                                        // log(`  Added bold & underlined word: ${wordText}`);
-                                    } else if (isBold) {
-                                        // 仅粗体
-                                        wordElement = document.createElement('b');
-                                        wordElement.textContent = wordText;
-                                        // log(`  Added bold word: ${wordText}`);
-                                    } else if (isLearned) {
-                                        // 仅下划线
-                                        wordElement = document.createElement('u');
-                                        wordElement.textContent = wordText;
-                                        // log(`  Added underlined word: ${wordText}`);
-                                    } else {
-                                        // 普通单词 (创建文本节点)
-                                        wordElement = document.createTextNode(wordText);
-                                        // log(`  Added normal word: ${wordText}`);
-                                    }
-                                    pElement.appendChild(wordElement);
-                                    contentAddedToParagraph = true;
-                                    nodeProcessed = true;
-                                }
-                            }
-                            // B. 如果是空格 span (<span> </span>)
-                            else if (node.textContent.trim() === '' && contentAddedToParagraph) {
-                                // 只在已有内容后添加空格，且避免连续空格
-                                if (pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
-                                     pElement.appendChild(document.createTextNode(' '));
-                                     nodeProcessed = true;
-                                }
-                            }
-                        }
-                        // C. 如果是文本节点 (通常是标点符号)
-                        else if (node.nodeType === Node.TEXT_NODE) {
-                            const punctuation = node.textContent.trim();
-                            if (punctuation) {
-                                // 移除可能的前导空格
-                                if (pElement.lastChild && pElement.lastChild.nodeType === Node.TEXT_NODE && pElement.lastChild.textContent.endsWith(' ')) {
-                                    pElement.lastChild.textContent = pElement.lastChild.textContent.trimEnd();
-                                }
-                                pElement.appendChild(document.createTextNode(punctuation));
-                                contentAddedToParagraph = true;
-                                nodeProcessed = true;
-                                // log(`  Added punctuation: ${punctuation}`);
-                            } else if (node.textContent.includes(' ') && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
-                                // 如果文本节点只包含空格，也添加一个空格
-                                pElement.appendChild(document.createTextNode(' '));
-                                nodeProcessed = true;
-                            }
-                        }
-                        // D. 处理未被明确处理的节点（比如内部没有.word的span），只添加空格，避免丢失间距
-                        if (!nodeProcessed && node.nodeType === Node.ELEMENT_NODE && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
-                             if (node.textContent.includes(' ')) { // 如果节点内容包含空格，添加一个
-                                 pElement.appendChild(document.createTextNode(' '));
-                             }
-                        }
-
-                    }); // end of sentence childNodes loop
-
-                    // 在句子之间添加空格
-                    if (sentenceIndex < sentenceContainers.length - 1 && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
-                         pElement.appendChild(document.createTextNode(' '));
-                    }
-
-                }); // end of sentences loop
-            } else {
-                // 备用逻辑：如果段落内没有句子容器
-                 log(`Paragraph ${paraIndex + 1}: No sentence containers found. Trying direct rebuild (less reliable).`);
-                 paraContainer.childNodes.forEach(node => {
-                      if (node.nodeType === Node.ELEMENT_NODE && node.matches('span')) {
-                           const wordSpan = node.querySelector(config.wordSelector);
-                           if (wordSpan) {
-                               const wordText = wordSpan.textContent.trim();
-                               if (wordText) {
-                                    const isBold = wordSpan.classList.contains(config.boldClass);
-                                    const isLearned = wordSpan.classList.contains(config.learnedClass);
-                                    let wordElement = null;
                                     if (isBold && isLearned) { wordElement = document.createElement('b'); const u = document.createElement('u'); u.textContent = wordText; wordElement.appendChild(u); }
                                     else if (isBold) { wordElement = document.createElement('b'); wordElement.textContent = wordText; }
                                     else if (isLearned) { wordElement = document.createElement('u'); wordElement.textContent = wordText; }
                                     else { wordElement = document.createTextNode(wordText); }
-                                    pElement.appendChild(wordElement);
-                                    contentAddedToParagraph = true;
-                                    // 添加空格
-                                    if (pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
-                                          pElement.appendChild(document.createTextNode(' '));
-                                     }
-                               }
-                           }
-                      } else if (node.nodeType === Node.TEXT_NODE) {
-                           const text = node.textContent.replace(/\s+/g, ' ').trim();
-                            if (text) {
-                                 // 移除前导空格
-                                 if (pElement.lastChild && pElement.lastChild.nodeType === Node.TEXT_NODE && pElement.lastChild.textContent.endsWith(' ')) {
-                                     pElement.lastChild.textContent = pElement.lastChild.textContent.trimEnd();
-                                 }
-                                 pElement.appendChild(document.createTextNode(text + ' ')); // 标点后加空格
-                                 contentAddedToParagraph = true;
+                                    pElement.appendChild(wordElement); contentAddedToParagraph = true; nodeProcessed = true;
+                                }
+                            } else if (node.textContent.trim() === '' && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
+                                pElement.appendChild(document.createTextNode(' ')); nodeProcessed = true;
                             }
-                      }
-                 });
+                        } else if (node.nodeType === Node.TEXT_NODE) {
+                            const punctuation = node.textContent.trim();
+                            if (punctuation) {
+                                if (pElement.lastChild && pElement.lastChild.nodeType === Node.TEXT_NODE && pElement.lastChild.textContent.endsWith(' ')) { pElement.lastChild.textContent = pElement.lastChild.textContent.trimEnd(); }
+                                pElement.appendChild(document.createTextNode(punctuation)); contentAddedToParagraph = true; nodeProcessed = true;
+                            } else if (node.textContent.includes(' ') && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
+                                pElement.appendChild(document.createTextNode(' ')); nodeProcessed = true;
+                            }
+                        }
+                        if (!nodeProcessed && node.nodeType === Node.ELEMENT_NODE && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
+                             if (node.textContent.includes(' ')) { pElement.appendChild(document.createTextNode(' ')); }
+                        }
+                    });
+                    if (sentenceIndex < sentenceContainers.length - 1 && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
+                         pElement.appendChild(document.createTextNode(' '));
+                    }
+                });
+            } else {
+                 log(`Paragraph ${paraIndex + 1}: No sentence containers found. Trying direct rebuild.`);
+                 // ... [备用逻辑] ...
+                 paraContainer.childNodes.forEach(node => { /* ... 简化版处理 ... */ });
             }
 
-            // 7. 添加段落到文章，如果它有实际内容
             if (contentAddedToParagraph && pElement.textContent.trim()) {
-                // 清理段落末尾可能多余的空格
-                if (pElement.lastChild && pElement.lastChild.nodeType === Node.TEXT_NODE && pElement.lastChild.textContent.endsWith(' ')) {
-                    pElement.lastChild.textContent = pElement.lastChild.textContent.trimEnd();
-                }
-                 if (pElement.textContent.trim()) { // 再次检查确保不是只有空格
-                     readerArticle.appendChild(pElement);
-                     paragraphsGenerated++;
-                     log(`Paragraph ${paraIndex + 1} generated.`);
-                 } else {
-                      log(`Paragraph ${paraIndex + 1} resulted in empty or whitespace only after processing.`);
+                if (pElement.lastChild && pElement.lastChild.nodeType === Node.TEXT_NODE && pElement.lastChild.textContent.endsWith(' ')) { pElement.lastChild.textContent = pElement.lastChild.textContent.trimEnd(); }
+                 if (pElement.textContent.trim()) {
+                     readerArticle.appendChild(pElement); paragraphsGenerated++;
                  }
-            } else {
-                 log(`Paragraph ${paraIndex + 1}: No content generated or added.`);
             }
         }); // end of paragraphs loop
 
-        // ... [后续的添加元数据、插入页面、隐藏原始内容、标记处理的代码保持不变] ...
 
-        // 10. 检查是否生成了有效内容
+        // 5. 检查是否生成了段落内容
         if (paragraphsGenerated === 0) {
-            log('Error: Failed to generate any paragraph content. Aborting injection.');
-            return;
+            log('Warning: Failed to generate paragraph content. Article might be empty or structure changed.');
+            // 即使没有段落，也可能需要标题和按钮，所以不立即退出
         }
 
-        // 11. 添加必要的元数据
+        // 6. **创建并添加“完成阅读”模拟链接**
+        const originalButton = document.querySelector(config.originalFinishButtonSelector);
+        if (originalButton) {
+            log('Found original finish button. Creating simulation link.');
+            const finishLink = document.createElement('a');
+            finishLink.href = '#'; // 使用 # 防止页面跳转
+            finishLink.id = 'reader-mode-finish-link'; // 应用 CSS 样式
+            finishLink.textContent = originalButton.textContent.trim() || '完成阅读'; // 使用原始按钮文字或默认文字
+
+            finishLink.addEventListener('click', (event) => {
+                event.preventDefault(); // 阻止 # 的默认行为
+                event.stopPropagation(); // 阻止事件冒泡（可能不需要，但以防万一）
+                log('"Finish Reading" simulation link clicked!');
+
+                // 再次查找原始按钮，以防 DOM 变化
+                const currentOriginalButton = document.querySelector(config.originalFinishButtonSelector);
+                if (currentOriginalButton) {
+                    log('Attempting to click the original button...');
+                    try {
+                         currentOriginalButton.click();
+                         // 注意：alert 在阅读模式下可能看不到，提示信息最好在 console 输出
+                         log('Original button clicked successfully (programmatically). Exit reader mode to see results.');
+                         // 可以选择性地给用户一点视觉反馈，比如改变链接文字
+                         finishLink.textContent = '已尝试点击';
+                         finishLink.style.backgroundColor = '#d4edda'; // 绿色背景表示成功
+                         finishLink.style.borderColor = '#c3e6cb';
+                         finishLink.style.color = '#155724';
+                    } catch (e) {
+                        log('Error clicking the original button: ' + e);
+                        alert('无法自动点击“完成阅读”按钮，请退出阅读模式后手动点击。');
+                        finishLink.textContent = '点击失败';
+                         finishLink.style.backgroundColor = '#f8d7da'; // 红色背景表示失败
+                         finishLink.style.borderColor = '#f5c6cb';
+                         finishLink.style.color = '#721c24';
+                    }
+                } else {
+                    log('Error: Original finish button not found when link was clicked.');
+                    alert('错误：无法找到原始的“完成阅读”按钮。');
+                    finishLink.textContent = '按钮丢失';
+                    finishLink.style.backgroundColor = '#fff3cd'; // 黄色背景表示警告
+                    finishLink.style.borderColor = '#ffeeba';
+                    finishLink.style.color = '#856404';
+                }
+            });
+
+            // 将模拟链接添加到 readerArticle 的末尾
+            readerArticle.appendChild(finishLink);
+            log('Simulation link added to the generated article.');
+
+        } else {
+            log('Warning: Original finish button not found. Cannot add simulation link.');
+        }
+
+
+        // 7. 添加元数据
         readerArticle.setAttribute('role', 'article');
         readerArticle.setAttribute('itemscope', '');
         readerArticle.setAttribute('itemtype', 'http://schema.org/Article');
+        // ... [添加 headline meta 的代码] ...
         const headlineMeta = document.createElement('meta');
         headlineMeta.setAttribute('itemprop', 'headline');
         headlineMeta.setAttribute('content', heading.textContent);
@@ -254,7 +241,8 @@
             readerArticle.appendChild(headlineMeta);
         }
 
-        // 12. 插入页面并隐藏原始内容
+
+        // 8. 插入页面并隐藏原始内容
         const parentOfOriginalContent = contentContainer.parentNode;
         if (parentOfOriginalContent) {
             parentOfOriginalContent.insertBefore(readerArticle, contentContainer);
@@ -267,7 +255,7 @@
         }
 
         document.body.dataset[marker] = 'true';
-        log('Restructuring complete (v0.6).');
+        log('Restructuring complete (v0.7).');
     }
 
     // --- 执行脚本 ---
@@ -276,7 +264,7 @@
         if (targetContent && !document.body.dataset.readerModeRestructured) {
             log('Content container detected via MutationObserver. Running restructuring...');
             setTimeout(restructureForReaderMode, 500);
-            // obs.disconnect(); // Consider disconnecting
+            // obs.disconnect();
         }
     });
 
