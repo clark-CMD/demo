@@ -1,69 +1,131 @@
 // ==UserScript==
-// @name         Shanbay Safari Reader Mode
+// @name         Shanbay Safari Reader Mode Enabler
 // @namespace    http://tampermonkey.net/
 // @version      0.1
-// @description  Make Shanbay website compatible with Safari's Reader Mode
+// @description  Make Shanbay articles compatible with Safari's Reader Mode
 // @author       You
 // @match        https://web.shanbay.com/reading/web-news/articles/*
+// @match        https://web.shanbay.com/*
 // @grant        none
 // ==/UserScript==
 
 (function() {
     'use strict';
     
-    // Function to run when the page is loaded
-    function enhanceForReaderMode() {
-        // Get the main article content
-        const articleTitle = document.querySelector('h1, .article-title');
-        const articleContent = document.querySelector('.article-content');
-        
-        if (!articleTitle || !articleContent) {
-            console.log('Could not find article elements');
-            return;
-        }
-        
-        // Create article element if it doesn't exist
+    function makeReaderModeCompatible() {
+        // Create a new article element if one doesn't already exist
         let articleElement = document.querySelector('article');
         if (!articleElement) {
             articleElement = document.createElement('article');
+            articleElement.className = 'reader-mode-article';
             
-            // Find a good place to insert the article element
-            const contentContainer = articleContent.parentElement;
-            if (contentContainer) {
-                contentContainer.parentNode.insertBefore(articleElement, contentContainer);
-                articleElement.appendChild(contentContainer);
-            } else {
-                // Fallback: wrap the article content
-                articleContent.parentNode.insertBefore(articleElement, articleContent);
-                articleElement.appendChild(articleContent);
+            // Find the main content container
+            const articleBody = document.querySelector('.article-body') || 
+                                document.querySelector('.app-main') ||
+                                document.querySelector('.page-content');
+            
+            if (!articleBody) {
+                console.log('Could not find article body');
+                return;
             }
+            
+            // Find the title
+            const titleElement = document.querySelector('h2') || document.querySelector('h1');
+            let title = '';
+            if (titleElement) {
+                title = titleElement.textContent;
+            }
+            
+            // Create a proper heading structure
+            const heading = document.createElement('h1');
+            heading.textContent = title || document.title;
+            articleElement.appendChild(heading);
+            
+            // Extract the main article content
+            const contentContainers = document.querySelectorAll('.article-content, .para');
+            
+            if (contentContainers.length > 0) {
+                // Process each paragraph in the content
+                contentContainers.forEach(container => {
+                    // Create a clean paragraph without the word-by-word spans
+                    const paragraph = document.createElement('p');
+                    paragraph.textContent = container.textContent;
+                    paragraph.style.fontSize = '16px';
+                    paragraph.style.lineHeight = '1.6';
+                    paragraph.style.margin = '1em 0';
+                    articleElement.appendChild(paragraph);
+                });
+            } else {
+                // If we can't find specific content containers, look for paragraphs
+                const sentences = [];
+                const sentenceElements = document.querySelectorAll('.sentence');
+                sentenceElements.forEach(sentence => {
+                    sentences.push(sentence.textContent);
+                });
+                
+                if (sentences.length > 0) {
+                    const paragraph = document.createElement('p');
+                    paragraph.textContent = sentences.join(' ');
+                    paragraph.style.fontSize = '16px';
+                    paragraph.style.lineHeight = '1.6';
+                    paragraph.style.margin = '1em 0';
+                    articleElement.appendChild(paragraph);
+                }
+            }
+            
+            // Add the article element to the document
+            const mainContainer = document.querySelector('.app-content-container') || 
+                                 document.querySelector('.page-content') || 
+                                 document.body;
+            
+            mainContainer.prepend(articleElement);
+            
+            // Add required metadata for Reader Mode
+            articleElement.setAttribute('role', 'article');
+            articleElement.setAttribute('itemscope', '');
+            articleElement.setAttribute('itemtype', 'http://schema.org/Article');
+            
+            // Make sure we have enough content for Reader Mode to recognize
+            ensureMinimumContentLength(articleElement);
         }
-        
-        // Ensure there's a proper heading structure
-        if (articleTitle && !articleElement.contains(articleTitle)) {
-            articleElement.insertBefore(articleTitle, articleElement.firstChild);
-        }
-        
-        // Add proper semantic attributes
-        articleElement.setAttribute('role', 'article');
-        articleElement.setAttribute('aria-labelledby', 'article-title');
-        
-        // Add additional semantic markup
-        if (articleTitle) {
-            articleTitle.id = 'article-title';
-            articleTitle.setAttribute('itemprop', 'headline');
-        }
-        
-        if (articleContent) {
-            articleContent.setAttribute('itemprop', 'articleBody');
-        }
-        
-        console.log('Enhanced page for Safari Reader Mode');
     }
     
-    // Run the function after page has loaded
-    window.addEventListener('load', enhanceForReaderMode);
+    function ensureMinimumContentLength(articleElement) {
+        // Reader Mode typically needs several paragraphs of content
+        const paragraphs = articleElement.querySelectorAll('p');
+        if (paragraphs.length < 3) {
+            // Extract text from the entire page
+            const allText = document.body.textContent;
+            const cleanText = allText.replace(/\s+/g, ' ').trim();
+            
+            // Split into sentences
+            const sentences = cleanText.split(/[.!?]+/);
+            
+            // Create at least 3 paragraphs
+            for (let i = 0; i < 3; i++) {
+                const startIdx = i * 3;
+                const endIdx = startIdx + 3;
+                const paragraphText = sentences.slice(startIdx, endIdx).join('. ');
+                
+                if (paragraphText.trim().length > 20) {
+                    const p = document.createElement('p');
+                    p.textContent = paragraphText + '.';
+                    p.style.fontSize = '16px';
+                    p.style.lineHeight = '1.6';
+                    p.style.margin = '1em 0';
+                    articleElement.appendChild(p);
+                }
+            }
+        }
+    }
     
-    // Also try running it immediately in case the page is already loaded
-    enhanceForReaderMode();
+    // Run the script after the page has loaded
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', makeReaderModeCompatible);
+    } else {
+        makeReaderModeCompatible();
+    }
+    
+    // Also run after a delay for dynamically loaded content
+    setTimeout(makeReaderModeCompatible, 1500);
 })();
