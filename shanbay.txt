@@ -1,157 +1,69 @@
 // ==UserScript==
-// @name         扇贝阅读增强 - 阅读模式 (支持 reading.shanbay & web.shanbay)
+// @name         Shanbay Safari Reader Mode
 // @namespace    http://tampermonkey.net/
-// @version      0.3
-// @description  在扇贝阅读页面 (reading.shanbay.com 和 web.shanbay.com) 添加阅读模式
+// @version      0.1
+// @description  Make Shanbay website compatible with Safari's Reader Mode
 // @author       You
-// @match        https://reading.shanbay.com/reader/articles/*
-// @match        https://web.shanbay.com/*  // 新增：匹配 web.shanbay.com 下的所有页面
-// @grant        GM_addStyle
+// @match        https://web.shanbay.com/reading/web-news/articles/*
+// @grant        none
 // ==/UserScript==
 
 (function() {
     'use strict';
-
-    // --- 样式代码 (保持不变) ---
-    GM_addStyle(`
-        #shanbay-reading-mode-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background-color: white;
-            color: black;
-            z-index: 9999;
-            overflow: auto;
-            padding: 20px;
-            font-size: 16px;
-            line-height: 1.6;
-            font-family: sans-serif;
-        }
-        #shanbay-reading-mode-title {
-            font-size: 24px;
-            font-weight: bold;
-            margin-bottom: 20px;
-        }
-        #shanbay-reading-mode-content { }
-        #shanbay-reading-mode-close-button {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            font-size: 20px;
-            cursor: pointer;
-            background-color: #f0f0f0;
-            padding: 5px 10px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-        }
-    `);
-
-    // --- 创建按钮函数 (保持不变) ---
-    function createReadingModeButton() {
-        // 检查页面上是否已经有按钮，避免重复添加 (可选优化)
-        if (document.getElementById('shanbay-reading-mode-toggle-button')) {
+    
+    // Function to run when the page is loaded
+    function enhanceForReaderMode() {
+        // Get the main article content
+        const articleTitle = document.querySelector('h1, .article-title');
+        const articleContent = document.querySelector('.article-content');
+        
+        if (!articleTitle || !articleContent) {
+            console.log('Could not find article elements');
             return;
         }
-
-        let button = document.createElement('button');
-        button.id = 'shanbay-reading-mode-toggle-button'; // 给按钮加个ID，方便查找
-        button.textContent = '阅读模式';
-        button.style.position = 'fixed';
-        button.style.top = '20px';
-        button.style.right = '20px';
-        button.style.zIndex = 10000;
-        button.style.backgroundColor = '#4CAF50';
-        button.style.color = 'white';
-        button.style.padding = '10px 15px';
-        button.style.border = 'none';
-        button.style.borderRadius = '5px';
-        button.style.cursor = 'pointer';
-
-        button.addEventListener('click', openReadingMode);
-        document.body.appendChild(button);
-    }
-
-    // --- 打开阅读模式函数 (核心逻辑，选择器可能需要为 web.shanbay.com 适配) ---
-    function openReadingMode() {
-        // !!! 这里的选择器是基于 reading.shanbay.com 的，可能不适用于 web.shanbay.com !!!
-        let titleElement = document.querySelector('.article-body h2');
-        let contentElement = document.querySelector('.article-content');
-
-        // 尝试为 web.shanbay.com 添加备选选择器 (如果知道结构的话)
-        // 例如:
-        // if (!titleElement) { titleElement = document.querySelector('.web-article-title'); }
-        // if (!contentElement) { contentElement = document.querySelector('.web-article-main-content'); }
-        // 目前不知道 web.shanbay.com 的结构，所以先保持原样
-
-        if (!titleElement || !contentElement) {
-            // 检查是否在 web.shanbay.com 上，如果是，可以给更具体的提示
-            if (window.location.hostname === 'web.shanbay.com') {
-                 alert('无法在当前 web.shanbay.com 页面找到文章标题或内容。请检查此页面的HTML结构，并联系脚本作者更新选择器。');
+        
+        // Create article element if it doesn't exist
+        let articleElement = document.querySelector('article');
+        if (!articleElement) {
+            articleElement = document.createElement('article');
+            
+            // Find a good place to insert the article element
+            const contentContainer = articleContent.parentElement;
+            if (contentContainer) {
+                contentContainer.parentNode.insertBefore(articleElement, contentContainer);
+                articleElement.appendChild(contentContainer);
             } else {
-                 alert('无法找到文章标题或内容，请检查页面结构。');
+                // Fallback: wrap the article content
+                articleContent.parentNode.insertBefore(articleElement, articleContent);
+                articleElement.appendChild(articleContent);
             }
-            return;
         }
-
-        let title = titleElement.textContent;
-        // 获取内容时，可以尝试克隆节点，避免影响原页面交互（如果需要的话）
-        let contentHTML = contentElement.innerHTML;
-
-        // --- 创建阅读模式容器等 (保持不变) ---
-        let container = document.createElement('div');
-        container.id = 'shanbay-reading-mode-container';
-
-        let titleDiv = document.createElement('div');
-        titleDiv.id = 'shanbay-reading-mode-title';
-        titleDiv.textContent = title;
-        container.appendChild(titleDiv);
-
-        let contentDiv = document.createElement('div');
-        contentDiv.id = 'shanbay-reading-mode-content';
-        contentDiv.innerHTML = contentHTML; // 使用获取到的内容
-        container.appendChild(contentDiv);
-
-        let closeButton = document.createElement('div');
-        closeButton.id = 'shanbay-reading-mode-close-button';
-        closeButton.textContent = 'X';
-        closeButton.addEventListener('click', closeReadingMode);
-        container.appendChild(closeButton);
-
-        document.body.appendChild(container);
-    }
-
-    // --- 关闭阅读模式函数 (保持不变) ---
-    function closeReadingMode() {
-        let container = document.getElementById('shanbay-reading-mode-container');
-        if (container) {
-            container.remove();
+        
+        // Ensure there's a proper heading structure
+        if (articleTitle && !articleElement.contains(articleTitle)) {
+            articleElement.insertBefore(articleTitle, articleElement.firstChild);
         }
+        
+        // Add proper semantic attributes
+        articleElement.setAttribute('role', 'article');
+        articleElement.setAttribute('aria-labelledby', 'article-title');
+        
+        // Add additional semantic markup
+        if (articleTitle) {
+            articleTitle.id = 'article-title';
+            articleTitle.setAttribute('itemprop', 'headline');
+        }
+        
+        if (articleContent) {
+            articleContent.setAttribute('itemprop', 'articleBody');
+        }
+        
+        console.log('Enhanced page for Safari Reader Mode');
     }
-
-    // --- 初始化：延迟执行或等待页面加载完成可能更稳妥 ---
-    // 有些页面内容可能是动态加载的，直接执行可能找不到元素
-    // 可以尝试延迟一点执行，或者使用更高级的方法监听DOM变化
-    setTimeout(createReadingModeButton, 1000); // 延迟1秒创建按钮，给页面加载留点时间
-
-    // 或者使用 window.onload
-    // window.onload = createReadingModeButton;
-
-    // 对于动态加载内容的页面，MutationObserver 是更可靠的方式，但更复杂
-    // let targetNode = document.body;
-    // let config = { childList: true, subtree: true };
-    // let callback = function(mutationsList, observer) {
-    //     // 检查目标元素是否出现，如果出现则创建按钮并断开观察
-    //     if (document.querySelector('.article-body h2') && document.querySelector('.article-content')) {
-    //          if (!document.getElementById('shanbay-reading-mode-toggle-button')) {
-    //               createReadingModeButton();
-    //          }
-    //         // observer.disconnect(); // 如果只需要创建一次，可以断开
-    //     }
-    // };
-    // let observer = new MutationObserver(callback);
-    // observer.observe(targetNode, config);
-
-
+    
+    // Run the function after page has loaded
+    window.addEventListener('load', enhanceForReaderMode);
+    
+    // Also try running it immediately in case the page is already loaded
+    enhanceForReaderMode();
 })();
