@@ -1,0 +1,123 @@
+// ==UserScript==
+// @name         扇贝阅读增强 - 阅读模式 (基于HTML源码优化)
+// @namespace    http://tampermonkey.net/
+// @version      0.2
+// @description  在扇贝阅读页面添加阅读模式，基于用户提供的HTML源码优化
+// @author       You
+// @match        https://reading.shanbay.com/reader/articles/*
+// @grant        GM_addStyle
+// ==/UserScript==
+
+(function() {
+    'use strict';
+
+    // 阅读模式样式 (与之前版本相同)
+    GM_addStyle(`
+        #shanbay-reading-mode-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: white;
+            color: black;
+            z-index: 9999;
+            overflow: auto;
+            padding: 20px;
+            font-size: 16px;
+            line-height: 1.6;
+            font-family: sans-serif; /* 修改字体 */
+        }
+
+        #shanbay-reading-mode-title {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+
+        #shanbay-reading-mode-content {
+            /* 可以添加更多样式来优化文章内容 */
+        }
+
+        #shanbay-reading-mode-close-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 20px;
+            cursor: pointer;
+            background-color: #f0f0f0;
+            padding: 5px 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+    `);
+
+    // 创建阅读模式按钮 (与之前版本相同)
+    function createReadingModeButton() {
+        let button = document.createElement('button');
+        button.textContent = '阅读模式';
+        button.style.position = 'fixed';
+        button.style.top = '20px';
+        button.style.right = '20px';
+        button.style.zIndex = 10000;
+        button.style.backgroundColor = '#4CAF50';
+        button.style.color = 'white';
+        button.style.padding = '10px 15px';
+        button.style.border = 'none';
+        button.style.borderRadius = '5px';
+        button.style.cursor = 'pointer';
+
+        button.addEventListener('click', openReadingMode);
+        document.body.appendChild(button);
+    }
+
+    // 打开阅读模式 (更新了CSS选择器)
+    function openReadingMode() {
+        // 基于提供的HTML源码，更精确地选择文章标题和内容
+        let titleElement = document.querySelector('.article-body h2'); //  文章标题在 .article-body 下的 <h2> 标签中
+        let contentElement = document.querySelector('.article-content'); // 文章内容在 class 为 article-content 的 div 中
+
+        // 如果找不到标题或内容，则返回 (与之前版本相同)
+        if (!titleElement || !contentElement) {
+            alert('无法找到文章标题或内容，请检查页面结构。');
+            return;
+        }
+
+        let title = titleElement.textContent;
+        let content = contentElement.innerHTML;
+
+        // 创建阅读模式容器、标题、内容、关闭按钮 (与之前版本相同)
+        let container = document.createElement('div');
+        container.id = 'shanbay-reading-mode-container';
+
+        let titleDiv = document.createElement('div');
+        titleDiv.id = 'shanbay-reading-mode-title';
+        titleDiv.textContent = title;
+        container.appendChild(titleDiv);
+
+        let contentDiv = document.createElement('div');
+        contentDiv.id = 'shanbay-reading-mode-content';
+        contentDiv.innerHTML = content;
+        container.appendChild(contentDiv);
+
+        let closeButton = document.createElement('div');
+        closeButton.id = 'shanbay-reading-mode-close-button';
+        closeButton.textContent = 'X';
+        closeButton.addEventListener('click', closeReadingMode);
+        container.appendChild(closeButton);
+
+        // 添加到页面 (与之前版本相同)
+        document.body.appendChild(container);
+    }
+
+    // 关闭阅读模式 (与之前版本相同)
+    function closeReadingMode() {
+        let container = document.getElementById('shanbay-reading-mode-container');
+        if (container) {
+            container.remove();
+        }
+    }
+
+    // 初始化 (与之前版本相同)
+    createReadingModeButton();
+})();
