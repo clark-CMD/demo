@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         扇贝阅读 Safari 阅读模式优化 v0.7 (模拟完成按钮)
+// @name         扇贝阅读 Safari 阅读模式优化 v0.9 (Hash触发完成)
 // @namespace    http://tampermonkey.net/
-// @version      0.7
-// @description  精确重建扇贝阅读文章内容，修复 Safari 阅读模式乱码，保留标记，并尝试添加“完成阅读”按钮。
+// @version      0.9
+// @description  精确重建内容，保留标记，并在阅读模式末尾添加链接，尝试通过URL哈希变化触发“完成阅读”。
 // @author       Your Name & Claude
 // @match        https://web.shanbay.com/reading/web-news/articles/*
-// @grant        GM_addStyle
+// @grant        none
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -21,43 +21,56 @@
         learnedClass: 'learned',
         titleSelectors: ['h2.article-title', '.article-header h2', 'h1', 'h2'],
         contentContainerSelector: '.article-content',
-        originalFinishButtonSelector: 'a.article-button.finish-button', // 原始完成按钮的选择器
+        originalFinishButtonSelector: 'a.article-button.finish-button',
+        finishActionHash: '#shanbayReaderFinishAction', // 用于触发操作的独特哈希值
         debug: true
     };
-
-    // --- 样式 ---
-    // 添加一些基本样式，让模拟按钮在阅读模式下稍微显眼一点
-    GM_addStyle(`
-        #reader-mode-finish-link {
-            display: block;
-            margin: 2em auto 1em auto; /* 上下边距，左右自动居中 */
-            padding: 10px 15px;
-            border: 1px solid #cccccc; /* 灰色边框 */
-            background-color: #f0f0f0; /* 浅灰色背景 */
-            color: #333333; /* 深灰色文字 */
-            text-decoration: none; /* 去掉下划线 */
-            border-radius: 5px; /* 圆角 */
-            text-align: center; /* 文字居中 */
-            cursor: pointer; /* 鼠标指针 */
-            max-width: 200px; /* 最大宽度 */
-            font-weight: bold;
-        }
-        #reader-mode-finish-link:hover {
-            background-color: #e0e0e0; /* 悬停时变深一点 */
-        }
-    `);
-
 
     // --- 工具函数 ---
     function log(message) {
         if (config.debug) {
-            console.log('[Shanbay Reader Mode Fix v0.7] ' + message);
+            console.log('[Shanbay Reader Mode Fix v0.9] ' + message);
         }
     }
 
-    // --- 主要逻辑 ---
+    // --- 哈希变化处理函数 (在原始页面上下文执行) ---
+    function handleHashChange() {
+        if (location.hash === config.finishActionHash) {
+            log(`Hash matched: ${config.finishActionHash}. Attempting to click finish button.`);
+
+            // 查找原始按钮
+            const originalButton = document.querySelector(config.originalFinishButtonSelector);
+            if (originalButton) {
+                try {
+                    originalButton.click();
+                    log('Original finish button clicked successfully via hash change.');
+                } catch (e) {
+                    log('Error clicking the original button via hash change: ' + e);
+                    alert('尝试点击“完成阅读”按钮时出错，请手动点击。');
+                }
+            } else {
+                log('Error: Original finish button not found when hash changed.');
+                alert('错误：无法找到原始的“完成阅读”按钮。');
+            }
+
+            // 清除哈希值，防止用户刷新或后退时再次触发
+            // 使用 replaceState 避免在历史记录中留下 #shanbayReaderFinishAction
+            history.replaceState(null, '', location.pathname + location.search);
+            log('URL hash cleared.');
+        }
+    }
+
+    // --- 添加哈希变化监听器 (只添加一次) ---
+    // 检查是否已添加监听器，防止重复添加（虽然影响不大）
+    if (!window.shanbayReaderHashListenerAdded) {
+        window.addEventListener('hashchange', handleHashChange, false);
+        window.shanbayReaderHashListenerAdded = true;
+        log('Hash change listener added.');
+    }
+
+    // --- 主要逻辑：重建阅读模式内容 ---
     function restructureForReaderMode() {
-        log('Starting restructuring process (v0.7)...');
+        log('Starting restructuring process (v0.9)...');
 
         const marker = 'readerModeRestructured';
         if (document.body.dataset[marker]) {
@@ -71,178 +84,90 @@
             return;
         }
 
-        // 1. 创建新的 <article> 容器
+        // 1. 创建 <article>
         const readerArticle = document.createElement('article');
         readerArticle.className = 'reader-mode-content-generated';
 
-        // 2. 寻找并添加标题
+        // 2. 添加标题
+        // ... [代码同 v0.8] ...
         let titleText = document.title;
         for (const selector of config.titleSelectors) {
-            const titleElement = document.querySelector(selector);
-            if (titleElement && titleElement.textContent.trim()) {
-                titleText = titleElement.textContent.trim();
-                log(`Found title using selector: ${selector}`);
-                break;
-            }
+             const titleElement = document.querySelector(selector);
+             if (titleElement && titleElement.textContent.trim()) { titleText = titleElement.textContent.trim(); break; }
         }
-        const heading = document.createElement('h1');
-        heading.textContent = titleText;
-        readerArticle.appendChild(heading);
-        log(`Article Title set to: ${titleText}`);
+        const heading = document.createElement('h1'); heading.textContent = titleText; readerArticle.appendChild(heading);
 
-        // 3. 查找所有段落容器
+
+        // 3. 重建段落和标记
+        // ... [代码同 v0.8] ...
         let paragraphContainers = contentContainer.querySelectorAll(config.paragraphSelector);
-        if (paragraphContainers.length === 0) {
-            log(`Warning: No paragraph containers found using direct selector. Trying fallback.`);
-            paragraphContainers = contentContainer.querySelectorAll('.para');
-             if (paragraphContainers.length === 0) {
-                 log(`Error: Still no paragraph containers found. Aborting content generation.`);
-                 return;
-             }
-        } else {
-            log(`Found ${paragraphContainers.length} paragraph containers.`);
-        }
-
+        if (paragraphContainers.length === 0) { paragraphContainers = contentContainer.querySelectorAll('.para'); }
         let paragraphsGenerated = 0;
-
-        // 4. 遍历每个段落容器 (重建内容 - 代码与 v0.6 基本相同)
         paragraphContainers.forEach((paraContainer, paraIndex) => {
-            const pElement = document.createElement('p');
-            pElement.style.margin = '1em 0';
-            pElement.style.lineHeight = '1.6';
-            let contentAddedToParagraph = false;
-
-            const sentenceContainers = paraContainer.querySelectorAll(config.sentenceSelector);
-            if (sentenceContainers.length > 0) {
-                // log(`Paragraph ${paraIndex + 1}: Found ${sentenceContainers.length} sentences. Rebuilding...`); // 减少日志量
-                sentenceContainers.forEach((sentenceContainer, sentenceIndex) => {
-                    sentenceContainer.childNodes.forEach(node => {
-                        let nodeProcessed = false;
-                        if (node.nodeType === Node.ELEMENT_NODE && node.matches('span')) {
-                            const wordSpan = node.querySelector(config.wordSelector);
-                            if (wordSpan) {
-                                const wordText = wordSpan.textContent.trim();
-                                if (wordText) {
-                                    const isBold = wordSpan.classList.contains(config.boldClass);
-                                    const isLearned = wordSpan.classList.contains(config.learnedClass);
-                                    let wordElement = null;
-                                    if (isBold && isLearned) { wordElement = document.createElement('b'); const u = document.createElement('u'); u.textContent = wordText; wordElement.appendChild(u); }
-                                    else if (isBold) { wordElement = document.createElement('b'); wordElement.textContent = wordText; }
-                                    else if (isLearned) { wordElement = document.createElement('u'); wordElement.textContent = wordText; }
-                                    else { wordElement = document.createTextNode(wordText); }
-                                    pElement.appendChild(wordElement); contentAddedToParagraph = true; nodeProcessed = true;
-                                }
-                            } else if (node.textContent.trim() === '' && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
-                                pElement.appendChild(document.createTextNode(' ')); nodeProcessed = true;
-                            }
-                        } else if (node.nodeType === Node.TEXT_NODE) {
-                            const punctuation = node.textContent.trim();
-                            if (punctuation) {
-                                if (pElement.lastChild && pElement.lastChild.nodeType === Node.TEXT_NODE && pElement.lastChild.textContent.endsWith(' ')) { pElement.lastChild.textContent = pElement.lastChild.textContent.trimEnd(); }
-                                pElement.appendChild(document.createTextNode(punctuation)); contentAddedToParagraph = true; nodeProcessed = true;
-                            } else if (node.textContent.includes(' ') && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
-                                pElement.appendChild(document.createTextNode(' ')); nodeProcessed = true;
-                            }
-                        }
-                        if (!nodeProcessed && node.nodeType === Node.ELEMENT_NODE && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
-                             if (node.textContent.includes(' ')) { pElement.appendChild(document.createTextNode(' ')); }
-                        }
-                    });
-                    if (sentenceIndex < sentenceContainers.length - 1 && contentAddedToParagraph && pElement.lastChild && (!pElement.lastChild.textContent || !pElement.lastChild.textContent.endsWith(' '))) {
-                         pElement.appendChild(document.createTextNode(' '));
-                    }
-                });
-            } else {
-                 log(`Paragraph ${paraIndex + 1}: No sentence containers found. Trying direct rebuild.`);
-                 // ... [备用逻辑] ...
-                 paraContainer.childNodes.forEach(node => { /* ... 简化版处理 ... */ });
-            }
-
-            if (contentAddedToParagraph && pElement.textContent.trim()) {
-                if (pElement.lastChild && pElement.lastChild.nodeType === Node.TEXT_NODE && pElement.lastChild.textContent.endsWith(' ')) { pElement.lastChild.textContent = pElement.lastChild.textContent.trimEnd(); }
-                 if (pElement.textContent.trim()) {
-                     readerArticle.appendChild(pElement); paragraphsGenerated++;
-                 }
-            }
+             const pElement = document.createElement('p'); pElement.style.margin = '1em 0'; pElement.style.lineHeight = '1.6';
+             let contentAddedToParagraph = false;
+             const sentenceContainers = paraContainer.querySelectorAll(config.sentenceSelector);
+             if (sentenceContainers.length > 0) {
+                  sentenceContainers.forEach((sentenceContainer, sentenceIndex) => {
+                       sentenceContainer.childNodes.forEach(node => { /* ... 处理单词 b/u/标点/空格 ... */
+                            let nodeProcessed = false;
+                            if (node.nodeType === Node.ELEMENT_NODE && node.matches('span')) {
+                                const wordSpan = node.querySelector(config.wordSelector);
+                                if (wordSpan) { const wordText = wordSpan.textContent.trim(); if(wordText){ const isBold=wordSpan.classList.contains(config.boldClass); const isLearned=wordSpan.classList.contains(config.learnedClass); let wordElement=null; if(isBold&&isLearned){wordElement=document.createElement('b');const u=document.createElement('u');u.textContent=wordText;wordElement.appendChild(u);}else if(isBold){wordElement=document.createElement('b');wordElement.textContent=wordText;}else if(isLearned){wordElement=document.createElement('u');wordElement.textContent=wordText;}else{wordElement=document.createTextNode(wordText);} pElement.appendChild(wordElement); contentAddedToParagraph=true; nodeProcessed=true;} }
+                                else if (node.textContent.trim()===''&&contentAddedToParagraph&&pElement.lastChild&&(!pElement.lastChild.textContent||!pElement.lastChild.textContent.endsWith(' '))){pElement.appendChild(document.createTextNode(' '));nodeProcessed=true;}
+                            } else if (node.nodeType===Node.TEXT_NODE){ const punctuation=node.textContent.trim(); if(punctuation){ if(pElement.lastChild&&pElement.lastChild.nodeType===Node.TEXT_NODE&&pElement.lastChild.textContent.endsWith(' ')){pElement.lastChild.textContent=pElement.lastChild.textContent.trimEnd();} pElement.appendChild(document.createTextNode(punctuation)); contentAddedToParagraph=true; nodeProcessed=true;} else if(node.textContent.includes(' ')&&contentAddedToParagraph&&pElement.lastChild&&(!pElement.lastChild.textContent||!pElement.lastChild.textContent.endsWith(' '))){pElement.appendChild(document.createTextNode(' '));nodeProcessed=true;} }
+                            if(!nodeProcessed&&node.nodeType===Node.ELEMENT_NODE&&contentAddedToParagraph&&pElement.lastChild&&(!pElement.lastChild.textContent||!pElement.lastChild.textContent.endsWith(' '))){ if(node.textContent.includes(' ')){pElement.appendChild(document.createTextNode(' '));} }
+                       });
+                       if (sentenceIndex<sentenceContainers.length-1&&contentAddedToParagraph&&pElement.lastChild&&(!pElement.lastChild.textContent||!pElement.lastChild.textContent.endsWith(' '))) { pElement.appendChild(document.createTextNode(' ')); }
+                  });
+             }
+             if (contentAddedToParagraph && pElement.textContent.trim()) {
+                 if (pElement.lastChild && pElement.lastChild.nodeType === Node.TEXT_NODE && pElement.lastChild.textContent.endsWith(' ')) { pElement.lastChild.textContent = pElement.lastChild.textContent.trimEnd(); }
+                  if (pElement.textContent.trim()) { readerArticle.appendChild(pElement); paragraphsGenerated++; }
+             }
         }); // end of paragraphs loop
 
 
-        // 5. 检查是否生成了段落内容
-        if (paragraphsGenerated === 0) {
-            log('Warning: Failed to generate paragraph content. Article might be empty or structure changed.');
-            // 即使没有段落，也可能需要标题和按钮，所以不立即退出
-        }
+        log(`Generated ${paragraphsGenerated} paragraphs.`);
 
-        // 6. **创建并添加“完成阅读”模拟链接**
+        // 4. **添加触发链接 (替换之前的提示)**
         const originalButton = document.querySelector(config.originalFinishButtonSelector);
         if (originalButton) {
-            log('Found original finish button. Creating simulation link.');
-            const finishLink = document.createElement('a');
-            finishLink.href = '#'; // 使用 # 防止页面跳转
-            finishLink.id = 'reader-mode-finish-link'; // 应用 CSS 样式
-            finishLink.textContent = originalButton.textContent.trim() || '完成阅读'; // 使用原始按钮文字或默认文字
+            log('Original finish button found. Adding trigger link.');
+            const triggerLink = document.createElement('a');
+            triggerLink.href = config.finishActionHash; // 指向特殊哈希
+            triggerLink.textContent = originalButton.textContent.trim() || '完成阅读';
+            // 添加一些样式让它看起来像个链接/按钮
+            triggerLink.style.display = 'block';
+            triggerLink.style.marginTop = '2em';
+            triggerLink.style.padding = '10px';
+            triggerLink.style.border = '1px solid #007aff'; // 蓝色边框
+            triggerLink.style.borderRadius = '5px';
+            triggerLink.style.textAlign = 'center';
+            triggerLink.style.color = '#007aff'; // 蓝色文字
+            triggerLink.style.textDecoration = 'none';
+            triggerLink.style.fontWeight = 'bold';
+            triggerLink.style.maxWidth = '200px';
+            triggerLink.style.marginLeft = 'auto';
+            triggerLink.style.marginRight = 'auto';
 
-            finishLink.addEventListener('click', (event) => {
-                event.preventDefault(); // 阻止 # 的默认行为
-                event.stopPropagation(); // 阻止事件冒泡（可能不需要，但以防万一）
-                log('"Finish Reading" simulation link clicked!');
-
-                // 再次查找原始按钮，以防 DOM 变化
-                const currentOriginalButton = document.querySelector(config.originalFinishButtonSelector);
-                if (currentOriginalButton) {
-                    log('Attempting to click the original button...');
-                    try {
-                         currentOriginalButton.click();
-                         // 注意：alert 在阅读模式下可能看不到，提示信息最好在 console 输出
-                         log('Original button clicked successfully (programmatically). Exit reader mode to see results.');
-                         // 可以选择性地给用户一点视觉反馈，比如改变链接文字
-                         finishLink.textContent = '已尝试点击';
-                         finishLink.style.backgroundColor = '#d4edda'; // 绿色背景表示成功
-                         finishLink.style.borderColor = '#c3e6cb';
-                         finishLink.style.color = '#155724';
-                    } catch (e) {
-                        log('Error clicking the original button: ' + e);
-                        alert('无法自动点击“完成阅读”按钮，请退出阅读模式后手动点击。');
-                        finishLink.textContent = '点击失败';
-                         finishLink.style.backgroundColor = '#f8d7da'; // 红色背景表示失败
-                         finishLink.style.borderColor = '#f5c6cb';
-                         finishLink.style.color = '#721c24';
-                    }
-                } else {
-                    log('Error: Original finish button not found when link was clicked.');
-                    alert('错误：无法找到原始的“完成阅读”按钮。');
-                    finishLink.textContent = '按钮丢失';
-                    finishLink.style.backgroundColor = '#fff3cd'; // 黄色背景表示警告
-                    finishLink.style.borderColor = '#ffeeba';
-                    finishLink.style.color = '#856404';
-                }
-            });
-
-            // 将模拟链接添加到 readerArticle 的末尾
-            readerArticle.appendChild(finishLink);
-            log('Simulation link added to the generated article.');
-
+            readerArticle.appendChild(triggerLink);
+            log('Trigger link added.');
         } else {
-            log('Warning: Original finish button not found. Cannot add simulation link.');
+            log('Original finish button not found. Cannot add trigger link.');
         }
 
-
-        // 7. 添加元数据
+        // 5. 添加元数据
         readerArticle.setAttribute('role', 'article');
         readerArticle.setAttribute('itemscope', '');
         readerArticle.setAttribute('itemtype', 'http://schema.org/Article');
-        // ... [添加 headline meta 的代码] ...
         const headlineMeta = document.createElement('meta');
         headlineMeta.setAttribute('itemprop', 'headline');
         headlineMeta.setAttribute('content', heading.textContent);
-        if (readerArticle.firstChild) {
-            readerArticle.insertBefore(headlineMeta, readerArticle.firstChild.nextSibling);
-        } else {
-            readerArticle.appendChild(headlineMeta);
-        }
+        if (readerArticle.firstChild) { readerArticle.insertBefore(headlineMeta, readerArticle.firstChild.nextSibling); }
+        else { readerArticle.appendChild(headlineMeta); }
 
-
-        // 8. 插入页面并隐藏原始内容
+        // 6. 插入页面并隐藏原始内容
         const parentOfOriginalContent = contentContainer.parentNode;
         if (parentOfOriginalContent) {
             parentOfOriginalContent.insertBefore(readerArticle, contentContainer);
@@ -255,35 +180,29 @@
         }
 
         document.body.dataset[marker] = 'true';
-        log('Restructuring complete (v0.7).');
+        log('Restructuring complete (v0.9).');
     }
 
     // --- 执行脚本 ---
-    const observer = new MutationObserver((mutationsList, obs) => {
-        const targetContent = document.querySelector(config.contentContainerSelector);
-        if (targetContent && !document.body.dataset.readerModeRestructured) {
-            log('Content container detected via MutationObserver. Running restructuring...');
-            setTimeout(restructureForReaderMode, 500);
-            // obs.disconnect();
-        }
-    });
-
-    observer.observe(document.body, { childList: true, subtree: true });
-
-    function tryRun() {
-        if (document.querySelector(config.contentContainerSelector) && !document.body.dataset.readerModeRestructured) {
-            log('Content container found on initial check. Running restructuring...');
-            setTimeout(restructureForReaderMode, 500);
-        } else {
-            log('Content container not found yet or already restructured.');
-        }
-    }
-
-    if (document.readyState === 'complete' || document.readyState === 'interactive') {
-        tryRun();
-    } else {
-        window.addEventListener('DOMContentLoaded', tryRun);
-        window.addEventListener('load', tryRun);
-    }
+    // ... [MutationObserver 和 tryRun 代码同 v0.8] ...
+     const observer = new MutationObserver((mutationsList, obs) => {
+         const targetContent = document.querySelector(config.contentContainerSelector);
+         if (targetContent && !document.body.dataset.readerModeRestructured) {
+             log('Content container detected via MutationObserver. Running restructuring...');
+             setTimeout(restructureForReaderMode, 500);
+             // obs.disconnect();
+         }
+     });
+     observer.observe(document.body, { childList: true, subtree: true });
+     function tryRun() {
+         if (document.querySelector(config.contentContainerSelector) && !document.body.dataset.readerModeRestructured) {
+             log('Content container found on initial check. Running restructuring...');
+             setTimeout(restructureForReaderMode, 500);
+         } else {
+             log('Content container not found yet or already restructured.');
+         }
+     }
+     if (document.readyState === 'complete' || document.readyState === 'interactive') { tryRun(); }
+     else { window.addEventListener('DOMContentLoaded', tryRun); window.addEventListener('load', tryRun); }
 
 })();
