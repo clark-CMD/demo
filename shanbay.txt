@@ -5,6 +5,7 @@
 // @description  在扇贝阅读页面添加阅读模式，基于用户提供的HTML源码优化
 // @author       You
 // @match        https://reading.shanbay.com/reader/articles/*
+// @match        https://web.shanbay.com/reading/articles/*
 // @grant        GM_addStyle
 // ==/UserScript==
 
