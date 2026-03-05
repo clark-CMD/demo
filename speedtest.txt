@@ -19,3 +19,13 @@
 [2606:4700:3038:d2eb:9257:5939:d23:e475]:443#18 Osaka
 [2606:4700:130:e6cb:6660:b6e3:236d:47aa]:443#19 Osaka
 [2606:4700:11:d259:26d7:ce:dcf4:67af]:443#20 Osaka
+mfa.gov.ua#Ukraine
+saas.sin.fan#Hong Kong
+store.ubi.com#Japan
+cf.130519.xyz#Korea
+cf.008500.xyz#Hong Kong
+cf.090227.xyz#Singapore
+cf.877774.xyz#Hong Kong
+cdns.doon.eu.org#Japan
+sub.danfeng.eu.org#Taiwan
+cf.zhetengsha.eu.org#Hong Kong
