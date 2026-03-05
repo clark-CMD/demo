@@ -9,12 +9,13 @@
 [2606:4700:4409:4eee:57d9:9e51:2fb5:1a8f]:443#09 Hong Kong
 [2606:4700:85dc:cd69:69c2:78f0:c495:2554]:443#10 Osaka
 [2606:4700:3038:d2eb:9257:5939:d23:e475]:443#11 Osaka
-mfa.gov.ua#12 Ukraine
-saas.sin.fan#13 Hong Kong
-store.ubi.com#14 Japan
-cf.130519.xyz#15 Korea
-cf.008500.xyz#16 Hong Kong
-cf.090227.xyz#17 Singapore
-cdns.doon.eu.org#18 Japan
-sub.danfeng.eu.org#19 Taiwan
-cf.zhetengsha.eu.org#20 Hong Kong
+mfa.gov.ua#12 Ukraine-
+saas.sin.fan#13 Hong Kong-
+store.ubi.com#14 Japan-
+cf.130519.xyz#15 Korea-
+cf.008500.xyz#16 Hong Kong-
+cf.090227.xyz#17 Singapore-
+cdns.doon.eu.org#18 Japan-
+sub.danfeng.eu.org#19 Taiwan-
+cf.zhetengsha.eu.org#20 Hong Kong-
+
